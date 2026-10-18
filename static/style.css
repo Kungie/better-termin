@@ -29,9 +29,7 @@ a { color: var(--blue); }
 
 .brand { display: block; text-align: center; padding: 28px 16px 22px; text-decoration: none; }
 .brand .name { display: inline-flex; align-items: center; gap: 14px; color: var(--blue); }
-.brand .arc { width: 46px; height: 46px; border-radius: 50%;
-  border: 7px solid var(--lime); border-right-color: transparent; border-bottom-color: transparent;
-  transform: rotate(-20deg); }
+.brand .logo { display: block; width: 52px; height: 52px; }
 .brand h2 { margin: 0; font-style: italic; font-weight: 600; font-size: 30px; line-height: 1.05; text-align: left; }
 .brand h2 small { display: block; font-size: 22px; }
 

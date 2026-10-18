@@ -28,6 +28,7 @@ from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from email.utils import make_msgid
 from pathlib import Path
 
 import requests
@@ -314,8 +315,23 @@ def smtp_configured() -> bool:
     return all(os.environ.get(k) for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"))
 
 
-def send_email(to: str, subject: str, body: str) -> None:
-    """Send via SMTP (e.g. Gmail with an app password), configured in .env."""
+EMAIL_LOGO = ROOT / "static" / "icons" / "icon-192.png"
+
+
+def render_email(template: str, **ctx) -> tuple[str, str]:
+    """Render an HTML e-mail; returns (html, logo content id)."""
+    cid = make_msgid(domain="better-termin")
+    html = app.jinja_env.get_template(f"email/{template}").render(
+        logo_cid=cid[1:-1], site_url=request_base().rstrip("/"), **ctx)
+    return html, cid
+
+
+def send_email(to: str, subject: str, body: str, html: tuple[str, str] | None = None) -> None:
+    """Send via SMTP (e.g. Gmail with an app password), configured in .env.
+
+    `body` is the plain-text version; `html` is (html, logo cid) from render_email.
+    The logo is embedded in the message, so no remote image is loaded.
+    """
     if not smtp_configured():
         if os.environ.get("DEV_MAIL_LOG") == "1":  # local testing only: print the mail
             print(f"[dev mail] to {to}: {subject}\n{body}", file=sys.stderr, flush=True)
@@ -325,6 +341,10 @@ def send_email(to: str, subject: str, body: str) -> None:
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)
+    if html:
+        markup, cid = html
+        msg.add_alternative(markup, subtype="html")
+        msg.get_payload()[1].add_related(EMAIL_LOGO.read_bytes(), "image", "png", cid=cid)
     host, port = os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT", "587"))
     try:
         if port == 465:
@@ -345,12 +365,15 @@ def send_email(to: str, subject: str, body: str) -> None:
 
 
 def send_confirmation(email: str, cat_name: str, confirm_token: str) -> None:
+    url = f"{request_base()}confirm?token={confirm_token}"
     send_email(
         email,
         f"Confirm your Better Termin alert: {cat_name}",
         f"Someone (hopefully you) asked for an e-mail alert on Better Termin for:\n\n  {cat_name}\n\n"
-        f"To start the alert, confirm here:\n{request_base()}confirm?token={confirm_token}\n\n"
+        f"To start the alert, confirm here:\n{url}\n\n"
         f"If this wasn't you, ignore this e-mail. The sign-up is deleted automatically after 48 hours.\n",
+        render_email("confirm.html", title="Confirm your alert", preheader=f"Confirm your alert for {cat_name}",
+                     category=cat_name, confirm_url=url),
     )
 
 
@@ -378,17 +401,28 @@ def signup_rate_limited(ip: str) -> bool:
         return False
 
 
-def alert_email(cat_name: str, earliest: str, kind: str, token: str) -> tuple[str, str]:
-    """Subject and body of the e-mail sent when a slot opens or moves earlier."""
+def alert_email(cat_name: str, earliest: str, kind: str, token: str) -> tuple[str, str, tuple[str, str]]:
+    """Subject, plain-text body and HTML of the e-mail sent when a slot opens or moves earlier."""
     date, hhmm = earliest.split()
     what = "a slot opened" if kind == "opened" else "an earlier slot opened"
     subject = f"{cat_name}: {what} — {bot.fmt_date(date)} {hhmm}"
+    booking_url = bot.BASE_URL + "select2?md=" + bot.MANDANT
+    unsubscribe_url = f"{request_base()}unsubscribe?token={token}"
     body = (
         f"{cat_name}: {what}.\n\nEarliest appointment: {bot.fmt_date(date)} {hhmm}\n\n"
-        f"Book it here: {bot.BASE_URL}\n\n"
-        f"Remove this alert: {request_base()}unsubscribe?token={token}\n"
+        f"Book it here: {booking_url}\n\n"
+        f"Remove this alert: {unsubscribe_url}\n"
     )
-    return subject, body
+    day = datetime.strptime(date, "%Y-%m-%d").date()
+    n = (day - datetime.now().date()).days
+    html = render_email(
+        "alert.html", title="A slot opened" if kind == "opened" else "An earlier slot opened",
+        preheader=f"{cat_name}: {bot.fmt_date(date)} {hhmm}", category=cat_name,
+        date=day.strftime("%d.%m.%Y"), weekday=bot.WEEKDAYS[day.weekday()], time=hhmm,
+        days_until="today" if n <= 0 else "tomorrow" if n == 1 else f"in {n} days",
+        booking_url=booking_url, unsubscribe_url=unsubscribe_url,
+    )
+    return subject, body, html
 
 
 def notify_subscribers(cat: bot.Category, earliest: str, kind: str) -> None:

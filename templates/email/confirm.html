@@ -1,0 +1,15 @@
+{% extends "email/base.html" %}
+{% block content %}
+  <p style="margin:0 0 12px;">Someone (hopefully you) asked for an e-mail alert for:</p>
+  <div style="font-weight:600;font-size:17px;margin:0 0 18px;">{{ category }}</div>
+  <p style="margin:0 0 20px;">You'll get an e-mail when a slot opens or an earlier slot appears. To start the alert, confirm it:</p>
+
+  <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+    <td style="background:#254c94;">
+      <a href="{{ confirm_url }}" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-size:16px;">Confirm alert</a>
+    </td>
+  </tr></table>
+{% endblock %}
+{% block footer %}
+  If this wasn't you, ignore this e-mail. The sign-up is deleted automatically after 48 hours.<br>
+{% endblock %}

@@ -27,7 +27,7 @@ class EventTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         web.init_db()
         self.sent = []
-        p = mock.patch.object(web, "send_email", lambda to, subj, body: self.sent.append((to, subj)))
+        p = mock.patch.object(web, "send_email", lambda to, subj, body, html=None: self.sent.append((to, subj)))
         p.start()
         self.addCleanup(p.stop)
 
@@ -95,7 +95,7 @@ class AlertApiTests(unittest.TestCase):
         with web.db() as c:
             c.execute("INSERT INTO categories VALUES ('344','RWTH Studenten','RWTH',0)")
         self.mails = []
-        p = mock.patch.object(web, "send_email", lambda to, subj, body: self.mails.append((to, subj, body)))
+        p = mock.patch.object(web, "send_email", lambda to, subj, body, html=None: self.mails.append((to, subj, body)))
         p.start(); self.addCleanup(p.stop)
         web._signups.clear()
         p = mock.patch.dict(os.environ, {"DEV_MAIL_LOG": "1"})
@@ -216,6 +216,24 @@ class SmtpTests(unittest.TestCase):
         self.assertEqual((server.user, server.password), ("me@example", "pw"))
         msg = server.send_message.call_args[0][0]
         self.assertEqual((msg["To"], msg["From"], msg["Subject"]), ("to@example", "me@example", "Subject"))
+
+    def test_html_alert_with_embedded_logo(self):
+        subject, text, html = web.alert_email("RWTH Studenten", "2026-12-02 10:00", "opened", "tok")
+        self.assertIn("Book on the official site", html[0])
+        self.assertIn("unsubscribe?token=tok", html[0])
+        self.assertIn("unsubscribe?token=tok", text)
+        env = {"SMTP_HOST": "smtp.example", "SMTP_USER": "me@example", "SMTP_PASSWORD": "pw"}
+        with mock.patch.dict(os.environ, env), mock.patch.object(web.smtplib, "SMTP") as smtp:
+            web.send_email("to@example", subject, text, html)
+        msg = smtp.return_value.send_message.call_args[0][0]
+        types = [part.get_content_type() for part in msg.walk()]
+        self.assertEqual(types, ["multipart/alternative", "text/plain", "multipart/related", "text/html", "image/png"])
+        logo = [p for p in msg.walk() if p.get_content_type() == "image/png"][0]
+        self.assertIn(logo["Content-ID"][1:-1], html[0])  # <img src="cid:..."> matches the attachment
+
+    def test_html_escapes_category_names(self):
+        _, _, html = web.alert_email("<script>x</script>", "2026-12-02 10:00", "opened", "tok")
+        self.assertNotIn("<script>x", html[0])
 
     def test_not_configured_sends_nothing(self):
         with mock.patch.dict(os.environ, {"SMTP_HOST": "", "DEV_MAIL_LOG": ""}), \
