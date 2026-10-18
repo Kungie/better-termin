@@ -31,3 +31,7 @@ A GitHub Actions workflow (`.github/workflows/termin-bot.yml`) runs this every 1
 ```bash
 .venv/bin/python -m unittest test_web
 ```
+
+## License
+
+[MIT](LICENSE). The bundled Noto Sans fonts in `static/fonts/` are under the [SIL Open Font License 1.1](static/fonts/OFL.txt).
