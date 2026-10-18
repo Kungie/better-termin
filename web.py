@@ -378,19 +378,24 @@ def signup_rate_limited(ip: str) -> bool:
         return False
 
 
-def notify_subscribers(cat: bot.Category, earliest: str, kind: str) -> None:
+def alert_email(cat_name: str, earliest: str, kind: str, token: str) -> tuple[str, str]:
+    """Subject and body of the e-mail sent when a slot opens or moves earlier."""
     date, hhmm = earliest.split()
     what = "a slot opened" if kind == "opened" else "an earlier slot opened"
-    subject = f"{cat.name}: {what} — {bot.fmt_date(date)} {hhmm}"
+    subject = f"{cat_name}: {what} — {bot.fmt_date(date)} {hhmm}"
+    body = (
+        f"{cat_name}: {what}.\n\nEarliest appointment: {bot.fmt_date(date)} {hhmm}\n\n"
+        f"Book it here: {bot.BASE_URL}\n\n"
+        f"Remove this alert: {request_base()}unsubscribe?token={token}\n"
+    )
+    return subject, body
+
+
+def notify_subscribers(cat: bot.Category, earliest: str, kind: str) -> None:
     with db() as c:
         subs = c.execute("SELECT * FROM alerts WHERE cat_id=? AND confirmed_at IS NOT NULL", (cat.id,)).fetchall()
         for sub in subs:
-            body = (
-                f"{cat.name}: {what}.\n\nEarliest appointment: {bot.fmt_date(date)} {hhmm}\n\n"
-                f"Book it here: {bot.BASE_URL}\n\n"
-                f"Remove this alert: {request_base()}unsubscribe?token={sub['token']}\n"
-            )
-            send_email(sub["email"], subject, body)
+            send_email(sub["email"], *alert_email(cat.name, earliest, kind, sub["token"]))
             c.execute("UPDATE alerts SET last_notified_at=? WHERE id=?", (now_iso(), sub["id"]))
 
 
