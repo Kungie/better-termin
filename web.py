@@ -444,6 +444,11 @@ def index():
     return render_template("index.html")
 
 
+@app.get("/favicon.ico")
+def favicon():
+    return app.send_static_file("icons/favicon.ico")
+
+
 @app.get("/imprint")
 def imprint():
     return render_template("imprint.html", op=operator())

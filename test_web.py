@@ -201,7 +201,7 @@ class AlertApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 413)
 
     def test_legal_pages_render(self):
-        for path in ("/imprint", "/privacy", "/"):
+        for path in ("/imprint", "/privacy", "/", "/favicon.ico", "/static/icons/icon.svg"):
             self.assertEqual(self.client.get(path).status_code, 200, path)
 
 
