@@ -327,10 +327,15 @@ def send_email(to: str, subject: str, body: str) -> None:
             server = smtplib.SMTP(host, port, timeout=30)
             server.starttls()
         with server:
-            server.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
+            # AUTH PLAIN only: when it fails, smtplib's fallback to LOGIN makes Gmail
+            # drop the connection, which hides the real error (e.g. 535 bad credentials).
+            server.ehlo()
+            server.user, server.password = os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"]
+            server.auth("PLAIN", server.auth_plain)
             server.send_message(msg)
     except (smtplib.SMTPException, OSError) as e:
-        print(f"Sending e-mail failed: {type(e).__name__}", file=sys.stderr)  # no address in logs
+        code = getattr(e, "smtp_code", "")
+        print(f"Sending e-mail failed: {type(e).__name__} {code}".rstrip(), file=sys.stderr)  # no address in logs
 
 
 def send_confirmation(email: str, cat_name: str, confirm_token: str) -> None:

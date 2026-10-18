@@ -208,7 +208,8 @@ class SmtpTests(unittest.TestCase):
             web.send_email("to@example", "Subject", "Body")
         server = smtp.return_value
         server.starttls.assert_called_once()
-        server.login.assert_called_once_with("me@example", "pw")
+        server.auth.assert_called_once_with("PLAIN", server.auth_plain)
+        self.assertEqual((server.user, server.password), ("me@example", "pw"))
         msg = server.send_message.call_args[0][0]
         self.assertEqual((msg["To"], msg["From"], msg["Subject"]), ("to@example", "me@example", "Subject"))
 
