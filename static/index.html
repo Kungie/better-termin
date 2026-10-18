@@ -169,6 +169,7 @@
 
   <footer>
     <a href="https://github.com/Kungie/better-termin" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://termine.staedteregion-aachen.de/auslaenderamt/" target="_blank" rel="noopener">Go to official site</a>
     <p>Data is read regularly from the official booking site. Opening frequency is based on the changes this app has observed since tracking started.</p>
   </footer>
 
@@ -258,7 +259,7 @@ function rowHtml(c) {
   }
   const on = myAlerts.has(c.id);
   return `<li class="row">
-    <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0].replace(/^Ausländeramt Aachen\s*-\s*/, ""))}</div></div>
+    <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0].replace(/^Ausländeramt Aachen(\s*-\s*)?/, ""))}</div></div>
     <div>${status}</div>
     <div class="alert">
       <button class="btn small ${on ? "on" : ""}" data-alert="${esc(c.id)}">${on ? "✓ Alert set" : "🔔 E-mail alert"}</button>
