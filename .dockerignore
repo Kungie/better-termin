@@ -1,0 +1,11 @@
+.git
+.venv
+.claude
+.github
+data
+__pycache__
+*.pyc
+.env
+state.json
+tailscale
+test_web.py

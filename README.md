@@ -12,9 +12,21 @@ python3 -m venv .venv
 
 Open http://127.0.0.1:8000. The app checks all categories every 5 minutes and stores history in `data/termin.db`.
 
-E-mail alerts use double opt-in: the alert only starts after the link in the confirmation e-mail is clicked, and unconfirmed sign-ups are deleted after 48 hours. Sending e-mails isn't wired up yet; for now `send_email` in `web.py` prints them to the server log.
+E-mail alerts stay switched off until SMTP is configured in `.env`. They use double opt-in: the alert only starts after the link in the confirmation e-mail is clicked, and unconfirmed sign-ups are deleted after 48 hours. For local testing, `DEV_MAIL_LOG=1` prints e-mails to the log instead of sending them.
 
 Before publishing, copy `.env.example` to `.env` and fill in the operator details shown on `/imprint` and `/privacy`. The app loads no third-party resources (fonts are self-hosted) and doesn't log IP addresses.
+
+## Deploy (home server + Tailscale Funnel)
+
+```bash
+cp .env.example .env   # fill in operator details, PUBLIC_URL and SMTP
+docker compose up -d --build
+docker compose logs tailscale   # open the login link once to add the device
+```
+
+The `tailscale` container joins your tailnet as its own device, `better-termin`, and publishes the app with Funnel at `https://better-termin.<tailnet>.ts.net`. The app shares that container's network namespace and listens on `127.0.0.1` only, so it isn't reachable from the LAN. It runs as an unprivileged user on a read-only filesystem with all capabilities dropped, and only `data/` is writable. Funnel must be allowed for your tailnet in the Tailscale admin console.
+
+Security measures in the app: a strict Content-Security-Policy (no inline scripts) and the other usual security headers, a same-origin check on every write, a 16 KB request limit, per-IP sign-up rate limiting, double opt-in alerts managed by random tokens, and no IP addresses in the logs.
 
 ## Command line
 

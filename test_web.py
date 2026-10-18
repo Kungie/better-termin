@@ -1,5 +1,6 @@
 """Tests for event detection and stats: .venv/bin/python -m unittest test_web"""
 
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -97,6 +98,8 @@ class AlertApiTests(unittest.TestCase):
         p = mock.patch.object(web, "send_email", lambda to, subj, body: self.mails.append((to, subj, body)))
         p.start(); self.addCleanup(p.stop)
         web._signups.clear()
+        p = mock.patch.dict(os.environ, {"DEV_MAIL_LOG": "1"})
+        p.start(); self.addCleanup(p.stop)
         self.client = web.app.test_client()
 
     def signup(self, email="a@b.de", consent=True):
@@ -163,9 +166,57 @@ class AlertApiTests(unittest.TestCase):
             self.assertEqual(self.signup(f"u{i}@b.de").status_code, 201)
         self.assertEqual(self.signup("one-more@b.de").status_code, 429)
 
+    def test_alerts_disabled_without_mail_delivery(self):
+        with mock.patch.dict(os.environ, {"DEV_MAIL_LOG": ""}):
+            self.assertEqual(self.signup().status_code, 503)
+        self.assertEqual(self.mails, [])
+
+    def test_cross_site_writes_blocked(self):
+        r = self.client.post("/api/alerts", headers={"Origin": "https://evil.example"},
+                             json={"email": "a@b.de", "category_id": "344", "consent": True})
+        self.assertEqual(r.status_code, 403)
+        r = self.client.post("/unsubscribe", headers={"Origin": "https://evil.example"}, data={"token": "x"})
+        self.assertEqual(r.status_code, 403)
+        # same-origin requests pass
+        r = self.client.post("/api/alerts", headers={"Origin": "http://localhost"},
+                             json={"email": "a@b.de", "category_id": "344", "consent": True})
+        self.assertEqual(r.status_code, 201)
+
+    def test_security_headers(self):
+        r = self.client.get("/")
+        csp = r.headers["Content-Security-Policy"]
+        self.assertIn("script-src 'self'", csp)
+        self.assertIn("frame-ancestors 'none'", csp)
+        self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(r.headers["Referrer-Policy"], "no-referrer")
+        self.assertNotIn("<script>", r.get_data(as_text=True))  # CSP forbids inline scripts
+        self.assertEqual(self.client.get("/api/alerts").headers["Cache-Control"], "no-store")
+
+    def test_oversized_request_rejected(self):
+        r = self.client.post("/api/alerts", data="x" * 20000, content_type="application/json")
+        self.assertEqual(r.status_code, 413)
+
     def test_legal_pages_render(self):
         for path in ("/imprint", "/privacy", "/"):
             self.assertEqual(self.client.get(path).status_code, 200, path)
+
+
+class SmtpTests(unittest.TestCase):
+    def test_sends_via_starttls(self):
+        env = {"SMTP_HOST": "smtp.example", "SMTP_PORT": "587", "SMTP_USER": "me@example", "SMTP_PASSWORD": "pw"}
+        with mock.patch.dict(os.environ, env), mock.patch.object(web.smtplib, "SMTP") as smtp:
+            web.send_email("to@example", "Subject", "Body")
+        server = smtp.return_value
+        server.starttls.assert_called_once()
+        server.login.assert_called_once_with("me@example", "pw")
+        msg = server.send_message.call_args[0][0]
+        self.assertEqual((msg["To"], msg["From"], msg["Subject"]), ("to@example", "me@example", "Subject"))
+
+    def test_not_configured_sends_nothing(self):
+        with mock.patch.dict(os.environ, {"SMTP_HOST": "", "DEV_MAIL_LOG": ""}), \
+             mock.patch.object(web.smtplib, "SMTP") as smtp:
+            web.send_email("to@example", "Subject", "Body")
+        smtp.assert_not_called()
 
 
 class StatsTests(unittest.TestCase):

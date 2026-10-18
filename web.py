@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import secrets
+import smtplib
 import sqlite3
 import statistics
 import sys
@@ -26,10 +27,12 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from email.message import EmailMessage
 from pathlib import Path
 
 import requests
 from flask import Flask, jsonify, render_template, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import termin_bot as bot
 
@@ -41,8 +44,48 @@ RESEND_GAP = timedelta(minutes=10)  # min gap between confirmation mails to one 
 SIGNUPS_PER_IP_PER_HOUR = 10
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024  # requests are small JSON bodies or form posts
 # Don't write visitors' IP addresses to the request log (see the privacy policy).
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
+CSP = "; ".join([
+    "default-src 'self'", "script-src 'self'", "style-src 'self'", "img-src 'self' data:",
+    "font-src 'self'", "connect-src 'self'", "object-src 'none'", "base-uri 'none'",
+    "form-action 'self'", "frame-ancestors 'none'",
+])
+
+
+@app.after_request
+def security_headers(resp):
+    h = resp.headers
+    h["Content-Security-Policy"] = CSP
+    h["X-Content-Type-Options"] = "nosniff"
+    h["X-Frame-Options"] = "DENY"
+    h["Referrer-Policy"] = "no-referrer"  # also keeps tokens in /confirm links out of Referer headers
+    h["Cross-Origin-Opener-Policy"] = "same-origin"
+    h["Cross-Origin-Resource-Policy"] = "same-origin"
+    h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    if request.is_secure:
+        h["Strict-Transport-Security"] = "max-age=31536000"
+    if request.path.startswith("/api/") or request.path in ("/confirm", "/unsubscribe"):
+        h["Cache-Control"] = "no-store"
+    return resp
+
+
+def allowed_origins() -> set[str]:
+    origins = {request.host_url.rstrip("/")}
+    if os.environ.get("PUBLIC_URL"):
+        origins.add(os.environ["PUBLIC_URL"].rstrip("/"))
+    return origins
+
+
+@app.before_request
+def block_cross_site_writes():
+    """CSRF defense: state-changing requests must come from this site's own pages."""
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        origin = request.headers.get("Origin")
+        if origin and origin not in allowed_origins():
+            return jsonify({"error": "Cross-site request blocked."}), 403
 
 
 def load_env(path: Path = ROOT / ".env") -> None:
@@ -262,12 +305,33 @@ def record(cat: bot.Category, results: list[bot.Result]) -> None:
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def send_email(to: str, subject: str, body: str) -> None:
-    """Placeholder: e-mail delivery will be wired up together with hosting.
+def smtp_configured() -> bool:
+    return all(os.environ.get(k) for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"))
 
-    Replace this with an SMTP / provider call (SendGrid, SES, Mailgun, ...).
-    """
-    print(f"[e-mail not configured yet] to {to}: {subject}\n{body}", file=sys.stderr, flush=True)
+
+def send_email(to: str, subject: str, body: str) -> None:
+    """Send via SMTP (e.g. Gmail with an app password), configured in .env."""
+    if not smtp_configured():
+        if os.environ.get("DEV_MAIL_LOG") == "1":  # local testing only: print the mail
+            print(f"[dev mail] to {to}: {subject}\n{body}", file=sys.stderr, flush=True)
+        return
+    msg = EmailMessage()
+    msg["From"] = os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+    host, port = os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT", "587"))
+    try:
+        if port == 465:
+            server = smtplib.SMTP_SSL(host, port, timeout=30)
+        else:
+            server = smtplib.SMTP(host, port, timeout=30)
+            server.starttls()
+        with server:
+            server.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
+            server.send_message(msg)
+    except (smtplib.SMTPException, OSError) as e:
+        print(f"Sending e-mail failed: {type(e).__name__}", file=sys.stderr)  # no address in logs
 
 
 def send_confirmation(email: str, cat_name: str, confirm_token: str) -> None:
@@ -417,6 +481,7 @@ def api_status():
         "progress": checker.progress,
         "error": checker.last_error,
         "booking_url": bot.BASE_URL + "select2?md=" + bot.MANDANT,
+        "alerts_enabled": alerts_enabled(),
         "categories": cats,
     })
 
@@ -443,8 +508,15 @@ def api_alerts_list():
     ])
 
 
+def alerts_enabled() -> bool:
+    # Without working e-mail delivery, collecting addresses would be pointless.
+    return smtp_configured() or os.environ.get("DEV_MAIL_LOG") == "1"
+
+
 @app.post("/api/alerts")
 def api_alerts_create():
+    if not alerts_enabled():
+        return jsonify({"error": "E-mail alerts aren't available yet."}), 503
     data = request.get_json(silent=True) or {}
     email = str(data.get("email", "")).strip().lower()
     cat_id = str(data.get("category_id", ""))
@@ -530,6 +602,10 @@ def main() -> None:
     args = p.parse_args()
 
     load_env()
+    if os.environ.get("TRUST_PROXY") == "1":
+        # Behind exactly one reverse proxy (the Tailscale container): take the
+        # client IP, scheme and host from its X-Forwarded-* headers.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     init_db()
     if not operator()["configured"]:
         print("Warning: OPERATOR_NAME / OPERATOR_ADDRESS / OPERATOR_EMAIL are not set; "
@@ -541,7 +617,8 @@ def main() -> None:
     app.config["PUBLIC_URL"] = os.environ.get("PUBLIC_URL", f"http://{args.host}:{args.port}/").rstrip("/") + "/"
     checker.start()
     print(f"UI: http://{args.host}:{args.port}", flush=True)
-    app.run(host=args.host, port=args.port, threaded=True, use_reloader=False)
+    from waitress import serve  # production WSGI server; no access log, so no IPs logged
+    serve(app, host=args.host, port=args.port, threads=8, ident="")
 
 
 if __name__ == "__main__":

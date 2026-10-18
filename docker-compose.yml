@@ -1,0 +1,43 @@
+# Better Termin on a home server, published with Tailscale Funnel.
+#
+# The tailscale container joins the tailnet as its own device ("better-termin"),
+# so the site gets https://better-termin.<tailnet>.ts.net without touching the
+# host's own Tailscale setup. The app shares its network namespace and listens
+# on 127.0.0.1 only: Funnel is the only way in, and nothing is exposed on the LAN.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: better-termin
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"   # no tun device or NET_ADMIN needed; the app can't route into the tailnet
+      TS_AUTH_ONCE: "true"
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ./tailscale/serve.json:/config/serve.json:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  app:
+    build: .
+    network_mode: service:tailscale
+    env_file: .env
+    environment:
+      TRUST_PROXY: "1"
+    volumes:
+      - termin-data:/app/data
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 100
+    depends_on: [tailscale]
+    restart: unless-stopped
+
+volumes:
+  ts-state:
+  termin-data:
