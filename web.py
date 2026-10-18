@@ -32,7 +32,6 @@ from pathlib import Path
 
 import requests
 from flask import Flask, jsonify, render_template, request
-from werkzeug.middleware.proxy_fix import ProxyFix
 
 import termin_bot as bot
 
@@ -602,10 +601,6 @@ def main() -> None:
     args = p.parse_args()
 
     load_env()
-    if os.environ.get("TRUST_PROXY") == "1":
-        # Behind exactly one reverse proxy (the Tailscale container): take the
-        # client IP, scheme and host from its X-Forwarded-* headers.
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     init_db()
     if not operator()["configured"]:
         print("Warning: OPERATOR_NAME / OPERATOR_ADDRESS / OPERATOR_EMAIL are not set; "
@@ -618,7 +613,15 @@ def main() -> None:
     checker.start()
     print(f"UI: http://{args.host}:{args.port}", flush=True)
     from waitress import serve  # production WSGI server; no access log, so no IPs logged
-    serve(app, host=args.host, port=args.port, threads=8, ident="")
+    proxy = {}
+    if os.environ.get("TRUST_PROXY") == "1":
+        # Behind exactly one local reverse proxy (the Tailscale container): take the
+        # client IP, scheme and host from its X-Forwarded-* headers. Waitress drops
+        # these headers from anyone else.
+        proxy = dict(trusted_proxy="127.0.0.1", trusted_proxy_count=1,
+                     trusted_proxy_headers="x-forwarded-for x-forwarded-host x-forwarded-proto")
+    serve(app, host=args.host, port=args.port, threads=8, ident="",
+          max_request_body_size=app.config["MAX_CONTENT_LENGTH"], **proxy)
 
 
 if __name__ == "__main__":

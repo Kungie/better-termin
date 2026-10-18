@@ -1,5 +1,7 @@
 # Better Termin
 
+**Live: https://better-termin.tail015e29.ts.net**
+
 An unofficial tracker for the [Ausländeramt Aachen](https://termine.staedteregion-aachen.de/auslaenderamt/) booking site. It shows the earliest free appointment for every category. For categories with no free slots, it shows how often new slots open. It only reads the site and never books anything.
 
 ## Run
