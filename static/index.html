@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aachen Termin Takip</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,600;0,700;1,600&display=swap">
+<style>
+  /* Colours and shapes taken from termine.staedteregion-aachen.de (TEVIS theme) */
+  :root {
+    --blue: #254c94;
+    --navy: #0a254c;
+    --text: #3d3d3d;
+    --muted: #6b6b6b;
+    --line: #e0e0e0;
+    --bg: #f4f4f4;
+    --card: #ffffff;
+    --lime: #b2c83a;
+    --ok: #2e7d32;
+    --ok-bg: #e8f3e8;
+    --none-bg: #f6f6f6;
+    --disabled: #8aa0c9;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 "Noto Sans", Arial, Helvetica, sans-serif;
+  }
+  a { color: var(--blue); }
+
+  .topbar { background: var(--blue); color: #fff; height: 48px; }
+  .topbar .inner { max-width: 960px; margin: 0 auto; height: 100%; padding: 0 16px;
+    display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+  .topbar .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 12px; }
+  .topbar .tag { flex: none; border: 1px solid rgba(255,255,255,.55); padding: 2px 8px; font-size: 12px; }
+
+  .brand { text-align: center; padding: 28px 16px 22px; }
+  .brand .name { display: inline-flex; align-items: center; gap: 14px; color: var(--blue); }
+  .brand .arc { width: 46px; height: 46px; border-radius: 50%;
+    border: 7px solid var(--lime); border-right-color: transparent; border-bottom-color: transparent;
+    transform: rotate(-20deg); }
+  .brand h2 { margin: 0; font-style: italic; font-weight: 600; font-size: 30px; line-height: 1.05; text-align: left; }
+  .brand h2 small { display: block; font-size: 22px; }
+
+  .content { max-width: 960px; margin: 0 auto 24px; background: var(--card);
+    box-shadow: 0 0 12px rgba(0,0,0,.08); padding: 24px 24px 28px; }
+  h1 { font-size: 20.5px; font-weight: 700; margin: 0 0 14px;
+    border-top: 1px solid var(--navy); padding-top: 16px; }
+
+  /* "Übersicht zu Ihrem Termin" box */
+  details.infobox { border: 1px solid var(--line); margin-bottom: 20px; }
+  details.infobox > summary, .group-head {
+    background: var(--blue); color: #fff; border: 1px solid var(--navy);
+    font-family: Arial, Helvetica, sans-serif; padding: 7px 16px; cursor: pointer; list-style: none;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "▸"; display: inline-block; width: 14px; font-size: 12px; }
+  details[open] > summary::before { content: "▾"; }
+  .info-body { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; }
+  .info-grid { display: grid; grid-template-columns: max-content auto; gap: 2px 12px;
+    font-family: Arial, Helvetica, sans-serif; margin: 0; }
+  .info-grid dt { font-weight: 700; text-align: right; color: #333; }
+  .info-grid dd { margin: 0; }
+  .info-body .actions { margin-left: auto; }
+
+  .btn { background: var(--blue); color: #fff; border: 1px solid transparent; border-radius: 0;
+    font: inherit; padding: 9px 16px; cursor: pointer; white-space: nowrap; }
+  .btn:hover:not(:disabled) { background: var(--navy); }
+  .btn:focus-visible { outline: 3px solid var(--lime); outline-offset: 2px; }
+  .btn:disabled { background: var(--disabled); cursor: default; }
+  .btn.outline { background: #fff; color: var(--blue); border-color: var(--blue); }
+  .btn.outline:hover { background: #eef2f9; }
+  .btn.small { padding: 6px 12px; font-size: 14px; }
+
+  .progress { height: 4px; background: var(--line); margin: -12px 0 20px; display: none; }
+  .progress > div { height: 100%; background: var(--blue); width: 0; transition: width .3s; }
+  .progress.on { display: block; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  .seg { display: inline-flex; border: 1px solid var(--blue); }
+  .seg button { background: #fff; color: var(--blue); border: 0; font: inherit; font-size: 14px;
+    padding: 6px 12px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--blue); }
+  .seg button[aria-pressed="true"] { background: var(--blue); color: #fff; }
+  .toolbar .hint { font-size: 14px; color: var(--muted); }
+
+  .group { margin-bottom: 4px; }
+  .group-head { display: flex; justify-content: space-between; cursor: default; }
+  .group-head .cnt { font-size: 14px; opacity: .9; }
+  .rows { list-style: none; margin: 0 0 14px; padding: 0; border: 1px solid var(--line); border-top: 0; }
+  .row { display: grid; grid-template-columns: minmax(180px, 1.1fr) 1.4fr auto; gap: 8px 18px;
+    padding: 12px 16px; border-top: 1px solid var(--line); align-items: center; }
+  .row:first-child { border-top: 0; }
+  .row .cat { font-weight: 600; }
+  .row .loc { font-size: 13px; color: var(--muted); }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 7px; margin-bottom: 3px; }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .badge.none { background: var(--none-bg); color: var(--muted); border: 1px solid var(--line); }
+  .badge.err { background: #fdecea; color: #a12622; }
+  .when { font-size: 18px; font-weight: 700; color: var(--blue); }
+  .when .wd, .when .t { font-weight: 400; color: var(--text); font-size: 16px; }
+  .sub { font-size: 13px; color: var(--muted); }
+  .freq { font-size: 14px; }
+  .freq b { color: var(--text); }
+  .row .alert { justify-self: end; }
+  .btn.on { background: var(--ok); }
+  .btn.on:hover { background: #1f5a22; }
+
+  .empty { padding: 30px 16px; text-align: center; color: var(--muted); }
+
+  footer { max-width: 960px; margin: 0 auto 40px; padding: 0 16px; display: flex; flex-wrap: wrap;
+    justify-content: center; gap: 8px 32px; font-size: 15px; }
+  footer p { width: 100%; text-align: center; color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+
+  /* Modal styled like the site's "Hinweis" dialog */
+  dialog { border: 0; padding: 0; width: min(520px, calc(100vw - 32px)); box-shadow: 0 5px 25px rgba(0,0,0,.35); }
+  dialog::backdrop { background: rgba(0,0,0,.5); }
+  .m-head { display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .m-head h3 { margin: 0; font-size: 20px; }
+  .m-head button { background: none; border: 0; font-size: 26px; line-height: 1; cursor: pointer; color: #555; }
+  .m-body { padding: 16px 18px; }
+  .m-body h4 { margin: 0 0 4px; color: var(--blue); font-size: 17px; }
+  .m-body label { display: block; font-weight: 700; margin: 14px 0 6px; }
+  .m-body input { width: 100%; font: inherit; padding: 9px 10px; border: 2px solid rgba(61,61,61,.25); border-radius: 0; }
+  .m-body input:focus { outline: none; border-color: var(--blue); }
+  .note { background: #fff8e1; border-left: 4px solid #e0a800; padding: 8px 12px; font-size: 14px; margin-top: 14px; }
+  .m-err { color: #a12622; font-size: 14px; min-height: 1.2em; margin-top: 6px; }
+  .m-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .m-foot .btn { padding: 13px; font-size: 16px; }
+  .m-foot .btn + .btn { border-left: 2px solid #fff; }
+
+  @media (max-width: 720px) {
+    .content { padding: 16px; }
+    .row { grid-template-columns: 1fr; }
+    .row .alert { justify-self: stretch; }
+    .row .alert .btn { width: 100%; }
+    .info-body .actions { margin-left: 0; width: 100%; }
+    .info-body .actions .btn { width: 100%; }
+    .brand h2 { font-size: 24px; } .brand h2 small { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar"><div class="inner">
+    <span class="t">Ausländer- und Staatsangehörigkeitsbehörde · Termin takip</span>
+    <span class="tag">resmi değil</span>
+  </div></div>
+
+  <div class="brand"><div class="name">
+    <div class="arc" aria-hidden="true"></div>
+    <h2>Ausländeramt<small>Aachen</small></h2>
+  </div></div>
+
+  <main class="content">
+    <h1>Tüm termin türleri — en yakın randevu</h1>
+
+    <details class="infobox" open>
+      <summary>Genel durum</summary>
+      <div class="info-body">
+        <dl class="info-grid">
+          <dt>Termin olan</dt><dd id="s-avail">–</dd>
+          <dt>Son kontrol</dt><dd id="s-last">–</dd>
+          <dt>Sonraki kontrol</dt><dd id="s-next">–</dd>
+          <dt>Takip başlangıcı</dt><dd id="s-since">–</dd>
+        </dl>
+        <div class="actions">
+          <button class="btn" id="refresh">Şimdi kontrol et</button>
+        </div>
+      </div>
+    </details>
+    <div class="progress" id="progress" role="progressbar" aria-label="Kontrol ilerlemesi"><div></div></div>
+
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Filtre">
+        <button data-f="all" aria-pressed="true">Tümü</button>
+        <button data-f="yes" aria-pressed="false">Termin var</button>
+        <button data-f="no" aria-pressed="false">Termin yok</button>
+      </div>
+      <span class="hint" id="hint"></span>
+    </div>
+
+    <div id="list"><div class="empty">Yükleniyor…</div></div>
+  </main>
+
+  <footer>
+    <a id="book" href="https://termine.staedteregion-aachen.de/auslaenderamt/" target="_blank" rel="noopener">Termin sitesine git</a>
+    <a href="https://github.com/Kungie/aachen-termin-bot" target="_blank" rel="noopener">GitHub</a>
+    <p>Veriler resmi termin sitesinden düzenli olarak okunur. Açılma sıklığı, bu uygulamanın takip başladığından beri gözlediği değişikliklere dayanır.</p>
+  </footer>
+
+  <dialog id="dlg" aria-labelledby="dlg-title">
+    <form method="dialog" id="dlg-form">
+      <div class="m-head"><h3 id="dlg-title">E-posta alarmı</h3><button type="button" id="dlg-x" aria-label="Kapat">&times;</button></div>
+      <div class="m-body">
+        <h4 id="dlg-cat"></h4>
+        <div class="sub" id="dlg-desc">Bu kategoride termin açıldığında veya daha erken bir termin çıktığında e-posta gönderilir.</div>
+        <label for="dlg-email">E-posta adresi</label>
+        <input id="dlg-email" type="email" autocomplete="email" required placeholder="ornek@mail.com">
+        <div class="m-err" id="dlg-err" role="alert"></div>
+        <div class="note">E-posta gönderimi henüz aktif değil. Alarmın kaydedilir ve gönderim kurulunca bildirimler başlar.</div>
+      </div>
+      <div class="m-foot">
+        <button type="button" class="btn" id="dlg-cancel">Vazgeç</button>
+        <button type="submit" class="btn" id="dlg-ok">Alarm kur</button>
+      </div>
+    </form>
+  </dialog>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const WD = ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"];
+let data = null, filter = "all", myAlerts = new Set(), timer = null;
+
+function store(k, v) { try { v === undefined ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} }
+function load(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+const pad = (n) => String(n).padStart(2, "0");
+function fmtDate(iso) { const [y, m, d] = iso.split("-"); return `${d}.${m}.${y}`; }
+function fmtDT(iso) { const d = new Date(iso); return `${pad(d.getDate())}.${pad(d.getMonth()+1)}. ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function fmtTime(iso) { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function dur(sec) {
+  const m = sec / 60, h = m / 60, d = h / 24;
+  if (m < 60) return `${Math.max(1, Math.round(m))} dakika`;
+  if (h < 36) return `${Math.round(h)} saat`;
+  if (d < 14) return `${Math.round(d)} gün`;
+  return `${Math.round(d / 7)} hafta`;
+}
+// "her ~2 günde bir" — Turkish locative suffix depends on the unit
+function every(sec) {
+  const [n, unit] = dur(sec).split(" ");
+  const loc = { "dakika": "dakikada", "saat": "saatte", "gün": "günde", "hafta": "haftada" }[unit];
+  return n === "1" ? `~her ${loc} bir` : `~her ${n} ${loc} bir`;
+}
+function ago(iso) { return dur((Date.now() - new Date(iso)) / 1000) + " önce"; }
+function daysUntil(dateIso) {
+  const t = new Date(); t.setHours(0,0,0,0);
+  const d = new Date(dateIso + "T00:00:00");
+  const n = Math.round((d - t) / 86400000);
+  return n <= 0 ? "bugün" : n === 1 ? "yarın" : `${n} gün sonra`;
+}
+
+function freqHtml(c) {
+  const s = c.stats;
+  if (!s.openings) {
+    return `<div class="freq">Takip başladığından beri (${fmtDT(data.tracking_since)}) yeni termin açılmadı.</div>
+            <div class="sub">Açılma sıklığı veri toplandıkça burada görünecek.</div>`;
+  }
+  const parts = [];
+  if (s.avg_interval_s) parts.push(`Yeni termin açılma sıklığı: <b>${every(s.avg_interval_s)}</b>`);
+  const sub = [`son açılma ${ago(s.last_opened)} (${fmtDT(s.last_opened)})`];
+  if (s.typical_hour !== null) sub.push(`genelde ${pad(s.typical_hour)}:00 civarı`);
+  if (s.avg_open_s) sub.push(`açık kalma ~${dur(s.avg_open_s)}`);
+  sub.push(`son 30 günde ${s.openings_30d} kez`);
+  return `<div class="freq">${parts.join("")}</div><div class="sub">${sub.join(" · ")}</div>`;
+}
+
+function rowHtml(c) {
+  let status;
+  if (c.error && !c.earliest) {
+    status = `<span class="badge err">Kontrol edilemedi</span><div class="sub">${esc(c.error)}</div>`;
+  } else if (!c.checked_at) {
+    status = `<span class="badge none">Kontrol bekleniyor…</span>`;
+  } else if (c.earliest) {
+    const d = new Date(c.earliest.date + "T00:00:00");
+    const extra = [];
+    if (c.available_since) extra.push(`${ago(c.available_since)} açıldı`);
+    if (c.stats.earlier_30d) extra.push(`son 30 günde ${c.stats.earlier_30d} kez daha erken termin çıktı`);
+    status = `<span class="badge ok">Termin var · ${daysUntil(c.earliest.date)}</span>
+      <div class="when">${fmtDate(c.earliest.date)} <span class="wd">${WD[d.getDay()]}</span> <span class="t">${esc(c.earliest.time)}</span></div>
+      ${extra.length ? `<div class="sub">${extra.join(" · ")}</div>` : ""}`;
+  } else {
+    status = `<span class="badge none">Şu an boş termin yok</span>${freqHtml(c)}`;
+  }
+  const on = myAlerts.has(c.id);
+  return `<li class="row">
+    <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0])}</div></div>
+    <div>${status}</div>
+    <div class="alert"><button class="btn small ${on ? "on" : ""}" data-alert="${esc(c.id)}">${on ? "✓ Alarm kurulu" : "🔔 E-posta alarmı"}</button></div>
+  </li>`;
+}
+
+function render() {
+  if (!data) return;
+  const cats = data.categories;
+  const avail = cats.filter(c => c.earliest).length;
+  $("#s-avail").textContent = cats.length ? `${avail} / ${cats.length} kategori` : "–";
+  $("#s-last").textContent = data.last_check ? `${fmtTime(data.last_check)} (${ago(data.last_check)})` : "henüz yok";
+  $("#s-next").textContent = data.progress.running ? "şu an kontrol ediliyor" : (data.next_check ? fmtTime(data.next_check) : "–");
+  $("#s-since").textContent = fmtDT(data.tracking_since);
+  $("#book").href = data.booking_url;
+
+  const p = data.progress, bar = $("#progress");
+  bar.classList.toggle("on", p.running);
+  bar.firstElementChild.style.width = p.total ? `${(p.done / p.total) * 100}%` : "0";
+  $("#hint").textContent = p.running ? `Kontrol ediliyor ${p.done}/${p.total}: ${p.current || ""}` : (data.error ? `Son kontrol başarısız: ${data.error}` : "");
+  $("#refresh").disabled = p.running;
+
+  if (!cats.length) { $("#list").innerHTML = `<div class="empty">İlk kontrol yapılıyor…</div>`; return; }
+
+  const shown = cats.filter(c => filter === "all" || (filter === "yes") === !!c.earliest);
+  const groups = [];
+  for (const c of shown) {
+    let g = groups.find(g => g.name === c.group);
+    if (!g) groups.push(g = { name: c.group, items: [] });
+    g.items.push(c);
+  }
+  $("#list").innerHTML = groups.length ? groups.map(g => `
+    <section class="group">
+      <h3 class="group-head" style="margin:0;font-size:16px;font-weight:400"><span>${esc(g.name)}</span>
+        <span class="cnt">${g.items.filter(c => c.earliest).length}/${g.items.length} termin var</span></h3>
+      <ul class="rows">${g.items.map(rowHtml).join("")}</ul>
+    </section>`).join("") : `<div class="empty">Bu filtreye uyan kategori yok.</div>`;
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch("/api/status");
+    data = await r.json();
+    render();
+  } catch (e) {
+    $("#hint").textContent = "Sunucuya ulaşılamıyor.";
+  }
+  clearTimeout(timer);
+  timer = setTimeout(refreshStatus, data && data.progress.running ? 3000 : 30000);
+}
+
+async function loadAlerts() {
+  const email = load("alertEmail");
+  if (!email) return;
+  try {
+    const r = await fetch("/api/alerts?email=" + encodeURIComponent(email));
+    myAlerts = new Set(await r.json());
+    render();
+  } catch {}
+}
+
+// ---- filter
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+  filter = b.dataset.f;
+  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  render();
+}));
+
+// ---- manual refresh
+$("#refresh").addEventListener("click", async () => {
+  $("#refresh").disabled = true;
+  const r = await fetch("/api/refresh", { method: "POST" });
+  if (r.status === 429) $("#hint").textContent = "Az önce kontrol edildi, biraz bekle.";
+  setTimeout(refreshStatus, 800);
+});
+
+// ---- alert dialog
+const dlg = $("#dlg");
+let dlgCat = null;
+$("#list").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-alert]");
+  if (!b) return;
+  dlgCat = data.categories.find(c => c.id === b.dataset.alert);
+  const on = myAlerts.has(dlgCat.id);
+  $("#dlg-cat").textContent = dlgCat.name;
+  $("#dlg-title").textContent = on ? "Alarm kurulu" : "E-posta alarmı";
+  $("#dlg-ok").textContent = on ? "Alarmı kaldır" : "Alarm kur";
+  $("#dlg-email").value = load("alertEmail") || "";
+  $("#dlg-email").readOnly = on;
+  $("#dlg-err").textContent = "";
+  dlg.showModal();
+  if (!on) $("#dlg-email").focus();
+});
+const close = () => dlg.close();
+$("#dlg-x").addEventListener("click", close);
+$("#dlg-cancel").addEventListener("click", close);
+$("#dlg-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = $("#dlg-email").value.trim();
+  const on = myAlerts.has(dlgCat.id);
+  const r = await fetch("/api/alerts", {
+    method: on ? "DELETE" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, category_id: dlgCat.id }),
+  });
+  if (!r.ok) {
+    $("#dlg-err").textContent = (await r.json().catch(() => ({}))).error || "Bir hata oluştu.";
+    return;
+  }
+  store("alertEmail", email);
+  on ? myAlerts.delete(dlgCat.id) : myAlerts.add(dlgCat.id);
+  close();
+  render();
+});
+
+refreshStatus();
+loadAlerts();
+setInterval(render, 60000); // keep "x dakika önce" fresh
+</script>
+</body>
+</html>

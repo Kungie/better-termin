@@ -18,7 +18,7 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -54,12 +54,8 @@ class Result:
     category: Category
     location: str
     loc_id: str = ""
-    slots: list[Slot] = field(default_factory=list)
+    earliest: Slot | None = None
     error: str | None = None
-
-    @property
-    def earliest(self) -> Slot | None:
-        return min(self.slots, key=lambda s: (s.date, s.time)) if self.slots else None
 
 
 # --------------------------------------------------------------------------- #
@@ -107,24 +103,43 @@ def parse_location_name(page: str) -> str:
     return html.unescape(m.group(1)).replace("<br/>", ", ")
 
 
-def parse_slots(page: str) -> list[Slot]:
-    """Extract bookable slots from the step-4 page (suggest).
+FIRST_SLOT_RE = re.compile(r'<form[^>]*class="suggestion_form".*?</form>', re.S)
+
+
+def parse_first_slot(page: str) -> Slot | None:
+    """Return the earliest bookable slot on the step-4 page (suggest).
 
     Every bookable time is a <form class="suggestion_form"> with a hidden
-    `date` input (YYYYMMDD) and a submit button whose title is the time.
-    Disabled buttons are already taken and are ignored.
+    `date` input (YYYYMMDD) and a submit button whose title is the time;
+    taken times are disabled buttons. Days are listed in date order, so the
+    first form is the earliest slot.
     """
-    soup = BeautifulSoup(page, "html.parser")
-    slots = []
-    for form in soup.select("form.suggestion_form"):
-        date_input = form.find("input", attrs={"name": "date"})
-        button = form.find("button", attrs={"type": "submit"})
-        if date_input is None or button is None:
-            continue
-        d = date_input["value"]
-        t = (button.get("title") or button.get_text()).strip()
-        slots.append(Slot(f"{d[:4]}-{d[4:6]}-{d[6:8]}", t))
-    return slots
+    m = FIRST_SLOT_RE.search(page)
+    if not m:
+        return None
+    d = re.search(r'name="date" value="(\d{8})"', m.group(0))
+    t = re.search(r'<button[^>]*type="submit"[^>]*title="([^"]+)"', m.group(0))
+    if not d or not t:
+        return None
+    d = d.group(1)
+    return Slot(f"{d[:4]}-{d[4:6]}-{d[6:8]}", t.group(1).strip())
+
+
+def read_until_first_slot(resp: requests.Response) -> str:
+    """Read a streamed suggest page only up to its first bookable slot.
+
+    Pages with many free slots are several MB; we only need the head.
+    """
+    resp.encoding = resp.encoding or "utf-8"
+    page = ""
+    try:
+        for chunk in resp.iter_content(chunk_size=32768, decode_unicode=True):
+            page += chunk
+            if FIRST_SLOT_RE.search(page, max(0, len(page) - len(chunk) - 4096)):
+                break
+    finally:
+        resp.close()
+    return page
 
 
 def page_title(page: str) -> str:
@@ -167,7 +182,7 @@ def check_category(category: Category) -> list[Result]:
     if not locations:
         # Some categories may skip the location step and land directly on suggest.
         if "suggest" in r.url:
-            return [Result(category, parse_location_name(r.text), slots=parse_slots(r.text))]
+            return [Result(category, parse_location_name(r.text), earliest=parse_first_slot(r.text))]
         return [Result(category, "", error=f"Standort bulunamadı: {page_title(r.text)}")]
 
     results = []
@@ -178,14 +193,15 @@ def check_category(category: Category) -> list[Result]:
             s.get(location_url, timeout=TIMEOUT)
         data = {k: v for k, v in form.items() if k in ("loc", "gps_lat", "gps_long")}
         data["select_location"] = "Weiter"
-        r = s.post(location_url, data=data, timeout=TIMEOUT)
+        r = s.post(location_url, data=data, timeout=TIMEOUT, stream=True)
         r.raise_for_status()
-        title = page_title(r.text)
-        name = parse_location_name(r.text) or f"loc {form['loc']}"
+        page = read_until_first_slot(r)
+        title = page_title(page)
+        name = parse_location_name(page) or f"loc {form['loc']}"
         if "Fehler" in title:
             results.append(Result(category, name, form["loc"], error=title))
         else:
-            results.append(Result(category, name, form["loc"], parse_slots(r.text)))
+            results.append(Result(category, name, form["loc"], parse_first_slot(page)))
     return results
 
 
@@ -248,7 +264,6 @@ def diff_and_notify(results: list[Result], state: dict, first_run: bool) -> dict
             "category": res.category.name,
             "location": res.location,
             "earliest": current,
-            "slot_count": len(res.slots),
             "checked_at": datetime.now().isoformat(timespec="seconds"),
         }
         if current and (prev is None or current < prev) and not first_run:
@@ -269,7 +284,7 @@ def print_table(results: list[Result]) -> None:
         if res.error:
             info = f"HATA: {res.error}"
         elif res.earliest:
-            info = f"{fmt_date(res.earliest.date)} {res.earliest.time}  ({len(res.slots)} boş saat)"
+            info = f"{fmt_date(res.earliest.date)} {res.earliest.time}"
         else:
             info = "boş termin yok"
         print(f"  [{res.category.id}] {res.category.name:<{width}}  {info}")
@@ -336,8 +351,7 @@ def main() -> None:
             if args.json:
                 print(json.dumps(
                     [{**asdict(r.category), "location": r.location, "error": r.error,
-                      "earliest": asdict(r.earliest) if r.earliest else None,
-                      "slot_count": len(r.slots)} for r in results],
+                      "earliest": asdict(r.earliest) if r.earliest else None} for r in results],
                     ensure_ascii=False, indent=2))
             else:
                 print_table(results)

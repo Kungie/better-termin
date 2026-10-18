@@ -11,7 +11,23 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-## Kullanım
+## Web arayüzü
+
+```bash
+.venv/bin/python web.py
+```
+
+Sonra tarayıcıda **http://127.0.0.1:8000** adresini aç. Arayüz termin sitesinin temasındadır ve şunları gösterir:
+
+- **Termin varsa:** en yakın tarih ve saat (kaç gün sonra olduğu, takipte açıldığı görüldüyse ne zaman açıldığı).
+- **Termin yoksa:** yeni termin açılma sıklığı — ortalama kaç saatte/günde bir açıldığı, son açılma zamanı, genelde hangi saatte açıldığı, açık kalma süresi. Bu istatistikler uygulamanın **takip başladığından beri gözlediği** değişikliklere dayanır; ilk günlerde "veri toplanıyor" görünür.
+- **E-posta alarmı** butonu: kategori için e-posta adresi kaydeder. Kayıtlar `data/termin.db` içinde saklanır. ⚠️ E-posta *gönderimi* henüz bağlı değil (`web.py` içindeki `send_email` şimdilik sadece log yazar); hosting kurulunca SMTP/servis ile bağlanacak.
+
+Arka planda varsayılan olarak 5 dakikada bir tüm kategoriler kontrol edilir (`--interval 600` ile değiştirilebilir, `--port` ile port). "Şimdi kontrol et" butonu en fazla dakikada bir çalışır. Geçmiş `data/termin.db` (SQLite) dosyasında tutulur — silersen istatistikler sıfırlanır.
+
+Testler: `.venv/bin/python -m unittest test_web`
+
+## Komut satırı
 
 Kategorileri ve ID'lerini listele:
 
@@ -41,8 +57,8 @@ Sadece belirli kategoriler, 10 dakikada bir:
 
 ```
 === 18.10.2026 06:38:22 — en yakın terminler ===
-  [345] Freizügigkeit/ Daueraufenthaltsbescheinigung   21.10.2026 (Çar) 09:30  (270 boş saat)
-  [346] FH Studenten                                   25.11.2026 (Çar) 08:30  (128 boş saat)
+  [345] Freizügigkeit/ Daueraufenthaltsbescheinigung   21.10.2026 (Çar) 09:30
+  [346] FH Studenten                                   25.11.2026 (Çar) 08:30
   [344] RWTH Studenten                                 boş termin yok
 ```
 
@@ -114,6 +130,6 @@ Site TEVIS randevu sistemini kullanıyor. Bot her kategori için tarayıcının 
 
 1. `select2?md=1` — kategori listesi (Anliegen) okunur, yeni kategoriler otomatik eklenir.
 2. `location?...&cnc-<ID>=1` — kategori seçilir, standort formu okunur.
-3. Standort POST edilir → `suggest` sayfası; buradaki her `suggestion_form` boş bir saat demektir (dolu saatler `disabled` buton olarak görünür).
+3. Standort POST edilir → `suggest` sayfası; buradaki her `suggestion_form` boş bir saat demektir (dolu saatler `disabled` buton olarak görünür). Günler tarih sırasıyla listelendiği için sayfa **sadece ilk boş saate kadar** okunur ve bağlantı kesilir — birkaç MB'lık sayfaların tamamı indirilmez.
 
 Sunucuyu yormamak için kategoriler arasında 1 saniye beklenir ve kontrol aralığı en az 60 saniyedir.
