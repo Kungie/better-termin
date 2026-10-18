@@ -286,13 +286,19 @@ def run_once(category_filter: set[str] | None) -> list[Result]:
     if category_filter:
         categories = [c for c in categories if c.id in category_filter]
     results: list[Result] = []
+    # Progress goes to stderr so --json output on stdout stays clean.
+    tty = sys.stderr.isatty()
     for i, cat in enumerate(categories):
         if i:
             time.sleep(REQUEST_DELAY)
+        line = f"Kontrol ediliyor [{i + 1}/{len(categories)}] {cat.name}"
+        print(f"\r\033[K{line[:100]}" if tty else line, end="" if tty else "\n", file=sys.stderr, flush=True)
         try:
             results.extend(check_category(cat))
         except requests.RequestException as e:
             results.append(Result(cat, "", error=str(e)))
+    if tty:
+        print("\r\033[K", end="", file=sys.stderr, flush=True)
     return results
 
 
@@ -339,6 +345,8 @@ def main() -> None:
 
         if args.once:
             break
+        next_check = datetime.fromtimestamp(time.time() + interval).strftime("%H:%M:%S")
+        print(f"Sonraki kontrol: {next_check} (durdurmak için Ctrl+C)", file=sys.stderr, flush=True)
         time.sleep(interval)
 
 
