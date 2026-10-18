@@ -1,0 +1,51 @@
+name: Termin Bot
+
+on:
+  schedule:
+    # Her 15 dakikada bir (UTC). GitHub zamanlanmış çalıştırmaları gecikebilir.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+# Aynı anda tek çalıştırma: state.json'un üzerine yazılmasını önler.
+concurrency:
+  group: termin-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NO_MAC_NOTIFY: "1"
+      TZ: Europe/Berlin
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Bir önceki çalıştırmanın state.json dosyasını geri yükle (en yeni cache).
+      - name: Restore state
+        uses: actions/cache/restore@v6
+        with:
+          path: state.json
+          key: termin-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: termin-state-
+
+      - run: python termin_bot.py --once
+
+      - name: Save state
+        if: always() && hashFiles('state.json') != ''
+        uses: actions/cache/save@v6
+        with:
+          path: state.json
+          key: termin-state-${{ github.run_id }}-${{ github.run_attempt }}

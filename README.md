@@ -74,6 +74,40 @@ Bot her kontrolde en yakın tarihi `state.json` dosyasına kaydeder. Bir sonraki
      .venv/bin/python termin_bot.py --test-notify
      ```
 
+## GitHub Actions ile otomatik çalıştırma
+
+Bilgisayarın kapalıyken de takip için [`.github/workflows/termin-bot.yml`](.github/workflows/termin-bot.yml) botu GitHub sunucularında **her 15 dakikada bir** `python termin_bot.py --once` ile çalıştırır. `state.json` çalıştırmalar arasında GitHub Actions cache'inde saklanır, böylece daha erken termin tespiti çalışmaya devam eder. Bildirimler Telegram üzerinden gelir (macOS bildirimi kapalıdır).
+
+Kurulum:
+
+1. Repo sayfasında **Settings → Secrets and variables → Actions → New repository secret** ile iki secret ekle:
+   - `TELEGRAM_BOT_TOKEN` — BotFather'dan aldığın token
+   - `TELEGRAM_CHAT_ID` — yukarıda bulduğun `chat.id`
+
+   veya terminalden:
+
+   ```bash
+   gh secret set TELEGRAM_BOT_TOKEN
+   ```
+
+   ```bash
+   gh secret set TELEGRAM_CHAT_ID
+   ```
+
+2. **Actions** sekmesinde workflow'ların açık olduğundan emin ol. Zamanlanmış çalıştırma kendiliğinden başlar.
+3. Elle çalıştırmak için: Actions → **Termin Bot** → **Run workflow**, veya:
+
+   ```bash
+   gh workflow run termin-bot.yml
+   ```
+
+Notlar:
+
+- İlk çalıştırma (veya cache silindiğinde/7 gün kullanılmadığında) sadece başlangıç durumunu kaydeder, bildirim göndermez.
+- GitHub zamanlanmış çalıştırmaları garanti etmez; yoğun saatlerde birkaç dakika (bazen daha fazla) gecikebilir veya atlanabilir.
+- **Dakika kotası:** Özel (private) repolarda ücretsiz hesapta ayda 2000 Actions dakikası var. Bir çalıştırma ~1,5 dakika sürüyor ve 2 dakika olarak sayılıyor; her 15 dakikada bir çalıştırma ayda ~5800 dakika eder, yani kota ayın ortasından önce biter ve bot durur. Çözümler: repoyu public yapmak (public repolarda dakika sınırsız), sıklığı azaltmak (`cron: "0 * * * *"` = saatte bir, ~1450 dk/ay) veya workflow'daki komuta `--categories 344,346` ekleyip sadece ilgilendiğin kategorileri takip etmek (çalıştırma 1 dakikanın altına iner; `cron: "*/30 * * * *"` ile birlikte ~1450 dk/ay).
+- Durdurmak için: Actions → Termin Bot → **⋯ → Disable workflow**.
+
 ## Nasıl çalışır
 
 Site TEVIS randevu sistemini kullanıyor. Bot her kategori için tarayıcının izlediği adımları taklit eder:
