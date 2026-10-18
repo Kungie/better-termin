@@ -177,6 +177,10 @@ class AlertApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 403)
         r = self.client.post("/unsubscribe", headers={"Origin": "https://evil.example"}, data={"token": "x"})
         self.assertEqual(r.status_code, 403)
+        # "Origin: null" (sandboxed frames, privacy modes) is not trusted either
+        r = self.client.post("/confirm", headers={"Origin": "null"}, data={"token": "x"})
+        self.assertEqual(r.status_code, 403)
+        self.assertIn(b"Request blocked", r.data)
         # same-origin requests pass
         r = self.client.post("/api/alerts", headers={"Origin": "http://localhost"},
                              json={"email": "a@b.de", "category_id": "344", "consent": True})
@@ -188,7 +192,7 @@ class AlertApiTests(unittest.TestCase):
         self.assertIn("script-src 'self'", csp)
         self.assertIn("frame-ancestors 'none'", csp)
         self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
-        self.assertEqual(r.headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(r.headers["Referrer-Policy"], "same-origin")
         self.assertNotIn("<script>", r.get_data(as_text=True))  # CSP forbids inline scripts
         self.assertEqual(self.client.get("/api/alerts").headers["Cache-Control"], "no-store")
 

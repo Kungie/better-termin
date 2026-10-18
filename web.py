@@ -60,7 +60,10 @@ def security_headers(resp):
     h["Content-Security-Policy"] = CSP
     h["X-Content-Type-Options"] = "nosniff"
     h["X-Frame-Options"] = "DENY"
-    h["Referrer-Policy"] = "no-referrer"  # also keeps tokens in /confirm links out of Referer headers
+    # Not "no-referrer": with it, browsers send "Origin: null" on same-site form posts,
+    # which the cross-site check below would block. Other sites still get no Referer,
+    # so tokens in /confirm links don't leak.
+    h["Referrer-Policy"] = "same-origin"
     h["Cross-Origin-Opener-Policy"] = "same-origin"
     h["Cross-Origin-Resource-Policy"] = "same-origin"
     h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
@@ -84,7 +87,10 @@ def block_cross_site_writes():
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         origin = request.headers.get("Origin")
         if origin and origin not in allowed_origins():
-            return jsonify({"error": "Cross-site request blocked."}), 403
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Cross-site request blocked."}), 403
+            return message("Request blocked", "This request didn't come from this site. "
+                           "Please open the link from your e-mail again."), 403
 
 
 def load_env(path: Path = ROOT / ".env") -> None:
