@@ -21,10 +21,6 @@
     --ok-bg: #e8f3e8;
     --none-bg: #f6f6f6;
     --disabled: #8aa0c9;
-    /* Stadt Aachen serviceportal yellow */
-    --yellow: #e4c42b;
-    --yellow-dark: #c3a619;
-    --on-yellow: #353535;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -33,12 +29,6 @@
     font: 16px/1.45 "Noto Sans", Arial, Helvetica, sans-serif;
   }
   a { color: var(--blue); }
-
-  .topbar { background: var(--blue); color: #fff; height: 48px; }
-  .topbar .inner { max-width: 960px; margin: 0 auto; height: 100%; padding: 0 16px;
-    display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
-  .topbar .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 12px; }
-  .topbar .tag { flex: none; border: 1px solid rgba(255,255,255,.55); padding: 2px 8px; font-size: 12px; }
 
   .brand { text-align: center; padding: 28px 16px 22px; }
   .brand .name { display: inline-flex; align-items: center; gap: 14px; color: var(--blue); }
@@ -90,10 +80,6 @@
   .group-head .gname { flex: 1; }
   .group-head .cnt { font-size: 14px; opacity: .9; text-align: right; }
   .group-head:hover { background: var(--navy); }
-  .group.yellow > .group-head { background: var(--yellow); color: var(--on-yellow); border-color: var(--yellow-dark); }
-  .group.yellow > .group-head:hover { background: var(--yellow-dark); }
-  .group.yellow a.btn.outline { color: var(--on-yellow); border-color: var(--yellow-dark); }
-  .group.yellow a.btn.outline:hover { background: #fbf4d2; }
   .group:not([open]) + .group { margin-top: -3px; }
   .rows { list-style: none; margin: 0 0 14px; padding: 0; border: 1px solid var(--line); border-top: 0; }
   .row { display: grid; grid-template-columns: minmax(180px, 1.1fr) 1.4fr auto; gap: 8px 18px;
@@ -150,11 +136,6 @@
 </style>
 </head>
 <body>
-  <div class="topbar"><div class="inner">
-    <span class="t">Better Termin</span>
-    <span class="tag">unofficial</span>
-  </div></div>
-
   <div class="brand"><div class="name">
     <div class="arc" aria-hidden="true"></div>
     <h2>Better Termin<small>Unofficial tracking site</small></h2>
@@ -286,17 +267,6 @@ function rowHtml(c) {
   </li>`;
 }
 
-function linkOnlyRowHtml(c) {
-  return `<li class="row">
-    <div><div class="cat">${esc(c.name)}</div><div class="loc">${esc(c.location)}</div></div>
-    <div><span class="badge none">Not tracked</span>
-      <div class="freq">${esc(c.release)}</div><div class="sub">${esc(c.note)}</div></div>
-    <div class="alert">
-      <a class="btn small outline" href="${esc(c.url)}" target="_blank" rel="noopener">Go to site ↗</a>
-    </div>
-  </li>`;
-}
-
 function groupSummary(items) {
   const avail = items.filter(c => c.earliest);
   if (!avail.length) return `0/${items.length} available`;
@@ -332,11 +302,6 @@ function render() {
       <summary class="group-head"><span class="gname">${esc(g.name)}</span>
         <span class="cnt">${groupSummary(g.items)}</span></summary>
       <ul class="rows">${g.items.map(rowHtml).join("")}</ul>
-    </details>`).join("") + (data.link_only_groups || []).map(g => `
-    <details class="group ${esc(g.theme)}" data-group="${esc(g.name)}" ${openGroups.has(g.name) ? "open" : ""}>
-      <summary class="group-head"><span class="gname">${esc(g.name)}</span>
-        <span class="cnt">link only</span></summary>
-      <ul class="rows">${g.items.map(linkOnlyRowHtml).join("")}</ul>
     </details>`).join("") : "";
 }
 

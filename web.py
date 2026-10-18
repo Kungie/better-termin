@@ -35,26 +35,6 @@ ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "termin.db"
 MIN_REFRESH_GAP = 60  # seconds; "Check now" can't hammer the site
 
-# Services shown as links only. The city's Bürgerservice booking site
-# (SmartCJM) sits behind a Cloudflare bot challenge, so it can't be tracked.
-LINK_ONLY_GROUPS = [
-    {
-        "name": "Meldeangelegenheiten",
-        "theme": "yellow",
-        "items": [
-            {
-                "id": "melde-wohnsitz",
-                "name": "Wohnsitz an-/ab-/ummelden",
-                "location": "Bürgerservice Stadt Aachen",
-                "url": "https://stadt-aachen.saas.smartcjm.com/m/buergerservice/extern/calendar/"
-                       "?uid=15940648-b483-46d9-819e-285707f1fc34",
-                "note": "Live tracking isn't available: the city's booking site blocks automated checks.",
-                "release": "Extra same-day slots are released daily around 07:45 (according to aachen.de).",
-            },
-        ],
-    },
-]
-
 app = Flask(__name__, static_folder=None)
 
 
@@ -353,7 +333,6 @@ def api_status():
         "error": checker.last_error,
         "booking_url": bot.BASE_URL + "select2?md=" + bot.MANDANT,
         "categories": cats,
-        "link_only_groups": LINK_ONLY_GROUPS,
     })
 
 

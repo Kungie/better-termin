@@ -21,7 +21,6 @@ Then open **http://127.0.0.1:8000** in your browser. The UI uses the booking sit
 
 - **When a slot is available:** the earliest date and time, how many days away it is, and when it opened (if the app saw it open).
 - **When nothing is available:** how often new slots open: the average interval, when one last opened, the usual hour of day, and how long slots stay open. These stats come from the changes the app **has observed since tracking started**, so for the first few days the page shows that it is still collecting data.
-- **Meldeangelegenheiten (Wohnsitz an-/ab-/ummelden)** as a yellow, link-only group. The city's Bürgerservice booking site (SmartCJM) sits behind a Cloudflare bot check, so it isn't tracked. The row links to the booking page and notes that, according to aachen.de, extra same-day slots are released daily around 07:45.
 - Each row has a **Go to site** button. Ausländeramt rows open the category selection page, because a direct link to a category only works inside a browser session.
 - An **e-mail alert** button: saves an e-mail address for a category in `data/termin.db`. ⚠️ E-mail *delivery* is not wired up yet: `send_email` in `web.py` only logs for now. It will be connected to SMTP or a mail service once hosting is set up.
 
