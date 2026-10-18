@@ -12,7 +12,9 @@ python3 -m venv .venv
 
 Open http://127.0.0.1:8000. The app checks all categories every 5 minutes and stores history in `data/termin.db`.
 
-E-mail alert sign-ups are saved, but sending e-mails isn't wired up yet (see `send_email` in `web.py`).
+E-mail alerts use double opt-in: the alert only starts after the link in the confirmation e-mail is clicked, and unconfirmed sign-ups are deleted after 48 hours. Sending e-mails isn't wired up yet; for now `send_email` in `web.py` prints them to the server log.
+
+Before publishing, copy `.env.example` to `.env` and fill in the operator details shown on `/imprint` and `/privacy`. The app loads no third-party resources (fonts are self-hosted) and doesn't log IP addresses.
 
 ## Command line
 

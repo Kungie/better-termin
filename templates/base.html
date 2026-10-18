@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Better Termin{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <a class="brand" href="/"><div class="name">
+    <div class="arc" aria-hidden="true"></div>
+    <h2>Better Termin<small>Unofficial tracking site</small></h2>
+  </div></a>
+
+  {% block content %}{% endblock %}
+
+  <footer>
+    <a href="/imprint">Imprint</a>
+    <a href="/privacy">Privacy</a>
+    <a href="https://github.com/Kungie/better-termin" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://termine.staedteregion-aachen.de/auslaenderamt/" target="_blank" rel="noopener">Go to official site</a>
+    <p>Not affiliated with the Städteregion Aachen or its Ausländeramt. Data is read regularly from the official booking site; opening frequency is based on the changes this app has observed since tracking started.</p>
+  </footer>
+</body>
+</html>

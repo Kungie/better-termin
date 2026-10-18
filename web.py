@@ -14,6 +14,8 @@ Run:  .venv/bin/python web.py   →  http://127.0.0.1:8000
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import re
 import secrets
 import sqlite3
@@ -27,15 +29,45 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, render_template, request
 
 import termin_bot as bot
 
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "termin.db"
 MIN_REFRESH_GAP = 60  # seconds; "Check now" can't hammer the site
+CONFIRM_TTL = timedelta(hours=48)  # unconfirmed sign-ups are deleted after this
+RESEND_GAP = timedelta(minutes=10)  # min gap between confirmation mails to one address
+SIGNUPS_PER_IP_PER_HOUR = 10
 
-app = Flask(__name__, static_folder=None)
+app = Flask(__name__, static_folder="static", static_url_path="/static")
+# Don't write visitors' IP addresses to the request log (see the privacy policy).
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
+
+def load_env(path: Path = ROOT / ".env") -> None:
+    """Minimal .env loader (KEY=value lines); real environment variables win."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+def operator() -> dict:
+    """Who runs this site, for the imprint and privacy policy (from .env)."""
+    address = os.environ.get("OPERATOR_ADDRESS", "")
+    op = {
+        "name": os.environ.get("OPERATOR_NAME", ""),
+        "address_lines": [l.strip() for l in address.split("|") if l.strip()],
+        "email": os.environ.get("OPERATOR_EMAIL", ""),
+        "hosting": os.environ.get("HOSTING_PROVIDER", ""),
+        "mail": os.environ.get("EMAIL_PROVIDER", ""),
+    }
+    op["configured"] = bool(op["name"] and op["address_lines"] and op["email"])
+    return op
 
 
 # --------------------------------------------------------------------------- #
@@ -65,9 +97,12 @@ CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY,
     email TEXT NOT NULL,
     cat_id TEXT NOT NULL,
-    token TEXT NOT NULL UNIQUE,
+    token TEXT NOT NULL UNIQUE,   -- manage/unsubscribe token (browser + every alert mail)
     created_at TEXT,
     last_notified_at TEXT,
+    confirm_token TEXT UNIQUE,    -- double opt-in; only sent by e-mail, cleared on confirm
+    confirmed_at TEXT,
+    confirm_sent_at TEXT,
     UNIQUE (email, cat_id)
 );
 """
@@ -89,6 +124,11 @@ def init_db() -> None:
     with db() as c:
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
+        # older databases: add the double opt-in columns
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(alerts)")}
+        for col in ("confirm_token", "confirmed_at", "confirm_sent_at"):
+            if col not in cols:
+                c.execute(f"ALTER TABLE alerts ADD COLUMN {col} TEXT")
         c.execute("INSERT OR IGNORE INTO meta VALUES ('tracking_since', ?)", (now_iso(),))
 
 
@@ -128,6 +168,7 @@ class Checker:
     def _loop(self) -> None:
         while True:
             try:
+                delete_unconfirmed()
                 self.run_once()
                 self.last_error = None
             except (requests.RequestException, RuntimeError) as e:
@@ -226,7 +267,41 @@ def send_email(to: str, subject: str, body: str) -> None:
 
     Replace this with an SMTP / provider call (SendGrid, SES, Mailgun, ...).
     """
-    print(f"[e-mail not configured yet] {to}: {subject}", file=sys.stderr)
+    print(f"[e-mail not configured yet] to {to}: {subject}\n{body}", file=sys.stderr, flush=True)
+
+
+def send_confirmation(email: str, cat_name: str, confirm_token: str) -> None:
+    send_email(
+        email,
+        f"Confirm your Better Termin alert: {cat_name}",
+        f"Someone (hopefully you) asked for an e-mail alert on Better Termin for:\n\n  {cat_name}\n\n"
+        f"To start the alert, confirm here:\n{request_base()}confirm?token={confirm_token}\n\n"
+        f"If this wasn't you, ignore this e-mail. The sign-up is deleted automatically after 48 hours.\n",
+    )
+
+
+def delete_unconfirmed() -> None:
+    cutoff = (datetime.now() - CONFIRM_TTL).isoformat(timespec="seconds")
+    with db() as c:
+        c.execute("DELETE FROM alerts WHERE confirmed_at IS NULL AND created_at < ?", (cutoff,))
+
+
+_signups: dict[str, list[float]] = {}  # ip -> request times; memory only, kept for 1 hour
+_signups_lock = threading.Lock()
+
+
+def signup_rate_limited(ip: str) -> bool:
+    now = time.time()
+    with _signups_lock:
+        for key in list(_signups):
+            _signups[key] = [t for t in _signups[key] if now - t < 3600]
+            if not _signups[key]:
+                del _signups[key]
+        times = _signups.setdefault(ip, [])
+        if len(times) >= SIGNUPS_PER_IP_PER_HOUR:
+            return True
+        times.append(now)
+        return False
 
 
 def notify_subscribers(cat: bot.Category, earliest: str, kind: str) -> None:
@@ -234,7 +309,7 @@ def notify_subscribers(cat: bot.Category, earliest: str, kind: str) -> None:
     what = "a slot opened" if kind == "opened" else "an earlier slot opened"
     subject = f"{cat.name}: {what} — {bot.fmt_date(date)} {hhmm}"
     with db() as c:
-        subs = c.execute("SELECT * FROM alerts WHERE cat_id=?", (cat.id,)).fetchall()
+        subs = c.execute("SELECT * FROM alerts WHERE cat_id=? AND confirmed_at IS NOT NULL", (cat.id,)).fetchall()
         for sub in subs:
             body = (
                 f"{cat.name}: {what}.\n\nEarliest appointment: {bot.fmt_date(date)} {hhmm}\n\n"
@@ -292,7 +367,17 @@ def category_stats(events: list[sqlite3.Row], since: datetime) -> dict:
 
 @app.get("/")
 def index():
-    return send_from_directory(ROOT / "static", "index.html")
+    return render_template("index.html")
+
+
+@app.get("/imprint")
+def imprint():
+    return render_template("imprint.html", op=operator())
+
+
+@app.get("/privacy")
+def privacy():
+    return render_template("privacy.html", op=operator())
 
 
 @app.get("/api/status")
@@ -344,10 +429,18 @@ def api_refresh():
 
 @app.get("/api/alerts")
 def api_alerts_list():
-    email = (request.args.get("email") or "").strip().lower()
+    """Status of the alerts this browser created, looked up by their tokens."""
+    tokens = [t for t in (request.args.get("tokens") or "").split(",") if t][:50]
+    if not tokens:
+        return jsonify([])
     with db() as c:
-        rows = c.execute("SELECT cat_id FROM alerts WHERE email=?", (email,)).fetchall()
-    return jsonify([r["cat_id"] for r in rows])
+        rows = c.execute(
+            f"SELECT token, cat_id, confirmed_at FROM alerts WHERE token IN ({','.join('?' * len(tokens))})", tokens
+        ).fetchall()
+    return jsonify([
+        {"token": r["token"], "category_id": r["cat_id"], "status": "active" if r["confirmed_at"] else "pending"}
+        for r in rows
+    ])
 
 
 @app.post("/api/alerts")
@@ -357,31 +450,76 @@ def api_alerts_create():
     cat_id = str(data.get("category_id", ""))
     if not EMAIL_RE.match(email) or len(email) > 254:
         return jsonify({"error": "Please enter a valid e-mail address."}), 400
+    if data.get("consent") is not True:
+        return jsonify({"error": "Please accept the privacy policy to set an alert."}), 400
+    if signup_rate_limited(request.remote_addr or ""):
+        return jsonify({"error": "Too many sign-ups from this connection. Please try again later."}), 429
+
     with db() as c:
-        if not c.execute("SELECT 1 FROM categories WHERE id=?", (cat_id,)).fetchone():
+        cat = c.execute("SELECT name FROM categories WHERE id=?", (cat_id,)).fetchone()
+        if not cat:
             return jsonify({"error": "Unknown category."}), 400
+        row = c.execute("SELECT * FROM alerts WHERE email=? AND cat_id=?", (email, cat_id)).fetchone()
+        if row and row["confirmed_at"]:
+            # Don't hand out the token: whoever types an address must not be able to manage its alerts.
+            return jsonify({"status": "active"}), 200
+        if row:
+            sent = row["confirm_sent_at"]
+            if not sent or datetime.now() - datetime.fromisoformat(sent) >= RESEND_GAP:
+                c.execute("UPDATE alerts SET confirm_sent_at=? WHERE id=?", (now_iso(), row["id"]))
+                send_confirmation(email, cat["name"], row["confirm_token"])
+            return jsonify({"status": "pending"}), 200
+
+        token, confirm_token = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
         c.execute(
-            "INSERT OR IGNORE INTO alerts (email, cat_id, token, created_at) VALUES (?,?,?,?)",
-            (email, cat_id, secrets.token_urlsafe(24), now_iso()),
+            "INSERT INTO alerts (email, cat_id, token, created_at, confirm_token, confirm_sent_at) VALUES (?,?,?,?,?,?)",
+            (email, cat_id, token, now_iso(), confirm_token, now_iso()),
         )
-    return jsonify({"ok": True}), 201
+    send_confirmation(email, cat["name"], confirm_token)
+    return jsonify({"status": "pending", "token": token}), 201
 
 
 @app.delete("/api/alerts")
 def api_alerts_delete():
-    data = request.get_json(silent=True) or {}
-    email = str(data.get("email", "")).strip().lower()
+    token = str((request.get_json(silent=True) or {}).get("token", ""))
     with db() as c:
-        c.execute("DELETE FROM alerts WHERE email=? AND cat_id=?", (email, str(data.get("category_id", ""))))
-    return jsonify({"ok": True})
+        n = c.execute("DELETE FROM alerts WHERE token=?", (token,)).rowcount
+    return jsonify({"ok": bool(n)}), (200 if n else 404)
 
 
-@app.get("/unsubscribe")
+def message(title: str, text: str, **form):
+    return render_template("message.html", title=title, text=text, **form)
+
+
+@app.route("/confirm", methods=["GET", "POST"])
+def confirm():
+    token = request.values.get("token", "")
+    if request.method == "GET":
+        return message("Confirm your alert", "Click the button to start your e-mail alert.",
+                       action="/confirm", token=token, button="Confirm alert")
+    cutoff = (datetime.now() - CONFIRM_TTL).isoformat(timespec="seconds")
+    with db() as c:
+        n = c.execute(
+            "UPDATE alerts SET confirmed_at=?, confirm_token=NULL "
+            "WHERE confirm_token=? AND confirmed_at IS NULL AND created_at >= ?",
+            (now_iso(), token, cutoff),
+        ).rowcount
+    if n:
+        return message("Alert confirmed", "You'll get an e-mail when a slot opens or an earlier slot appears.")
+    return message("Link not valid", "This link has expired or was already used. You can set the alert again on the site.")
+
+
+@app.route("/unsubscribe", methods=["GET", "POST"])
 def unsubscribe():
+    token = request.values.get("token", "")
+    if request.method == "GET":
+        return message("Remove alert", "Click the button to stop this e-mail alert and delete its data.",
+                       action="/unsubscribe", token=token, button="Remove alert")
     with db() as c:
-        n = c.execute("DELETE FROM alerts WHERE token=?", (request.args.get("token", ""),)).rowcount
-    msg = "Alert removed." if n else "Alert not found (it may already have been removed)."
-    return f"<!doctype html><meta charset=utf-8><title>Alert</title><p style='font-family:sans-serif'>{msg}</p>"
+        n = c.execute("DELETE FROM alerts WHERE token=?", (token,)).rowcount
+    if n:
+        return message("Alert removed", "You won't get any more e-mails for this alert. Its data has been deleted.")
+    return message("Alert not found", "It may already have been removed.")
 
 
 def main() -> None:
@@ -391,12 +529,16 @@ def main() -> None:
     p.add_argument("--interval", type=int, default=300, help="check interval in seconds (min 60)")
     args = p.parse_args()
 
+    load_env()
     init_db()
+    if not operator()["configured"]:
+        print("Warning: OPERATOR_NAME / OPERATOR_ADDRESS / OPERATOR_EMAIL are not set; "
+              "fill them in .env before publishing (imprint and privacy policy).", file=sys.stderr)
     checker = Checker(max(args.interval, 60))
     with db() as c:  # survive restarts: show the last check from history
         checker.last_check = c.execute("SELECT MAX(ok_at) FROM status").fetchone()[0]
     app.config["CHECKER"] = checker
-    app.config["PUBLIC_URL"] = f"http://{args.host}:{args.port}/"
+    app.config["PUBLIC_URL"] = os.environ.get("PUBLIC_URL", f"http://{args.host}:{args.port}/").rstrip("/") + "/"
     checker.start()
     print(f"UI: http://{args.host}:{args.port}", flush=True)
     app.run(host=args.host, port=args.port, threaded=True, use_reloader=False)

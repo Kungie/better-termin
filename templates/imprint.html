@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Imprint · Better Termin{% endblock %}
+{% block content %}
+  <main class="content legal">
+    <h1>Imprint</h1>
+    {% if not op.configured %}
+      <p class="note">The operator details are not configured yet. Set <code>OPERATOR_NAME</code>, <code>OPERATOR_ADDRESS</code> and <code>OPERATOR_EMAIL</code> in <code>.env</code> before publishing this site.</p>
+    {% endif %}
+
+    <h2>Responsible for this site</h2>
+    <p>(§ 5 DDG, § 18 Abs. 1 MStV)</p>
+    <p>
+      {{ op.name or "[name]" }}<br>
+      {% for line in op.address_lines %}{{ line }}<br>{% else %}[address]<br>{% endfor %}
+      E-mail: {% if op.email %}<a href="mailto:{{ op.email }}">{{ op.email }}</a>{% else %}[e-mail]{% endif %}
+    </p>
+
+    <h2>About this site</h2>
+    <p>Better Termin is a private, non-commercial project. It is <strong>not affiliated with</strong> the Städteregion Aachen, its Ausländeramt or the operator of the official booking system. Appointments can only be booked on the <a href="https://termine.staedteregion-aachen.de/auslaenderamt/" target="_blank" rel="noopener">official booking site</a>.</p>
+    <p>The dates shown are read automatically from the official booking site and may be out of date or wrong. No guarantee is given that an appointment shown here is still available.</p>
+  </main>
+{% endblock %}

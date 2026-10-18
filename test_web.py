@@ -77,11 +77,95 @@ class EventTests(unittest.TestCase):
     def test_subscribers_notified_on_open(self):
         with web.db() as c:
             c.execute("INSERT INTO categories VALUES ('344','RWTH Studenten','RWTH',0)")
-            c.execute("INSERT INTO alerts (email, cat_id, token) VALUES ('a@b.de','344','t')")
+            c.execute("INSERT INTO alerts (email, cat_id, token, confirmed_at) VALUES ('a@b.de','344','t','2026-10-18T07:00:00')")
+            c.execute("INSERT INTO alerts (email, cat_id, token) VALUES ('unconfirmed@b.de','344','u')")
         web.record(CAT, res())
         web.record(CAT, res("2026-12-01"))
-        self.assertEqual(len(self.sent), 1)
-        self.assertEqual(self.sent[0][0], "a@b.de")
+        self.assertEqual([to for to, _ in self.sent], ["a@b.de"])  # unconfirmed get nothing
+
+
+class AlertApiTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        p = mock.patch.object(web, "DB_PATH", Path(self.tmp.name) / "t.db")
+        p.start(); self.addCleanup(p.stop)
+        web.init_db()
+        with web.db() as c:
+            c.execute("INSERT INTO categories VALUES ('344','RWTH Studenten','RWTH',0)")
+        self.mails = []
+        p = mock.patch.object(web, "send_email", lambda to, subj, body: self.mails.append((to, subj, body)))
+        p.start(); self.addCleanup(p.stop)
+        web._signups.clear()
+        self.client = web.app.test_client()
+
+    def signup(self, email="a@b.de", consent=True):
+        return self.client.post("/api/alerts", json={"email": email, "category_id": "344", "consent": consent})
+
+    def confirm_token(self):
+        return self.mails[-1][2].split("confirm?token=")[1].split()[0]
+
+    def status(self, token):
+        return self.client.get(f"/api/alerts?tokens={token}").get_json()
+
+    def test_double_opt_in(self):
+        r = self.signup()
+        self.assertEqual(r.status_code, 201)
+        token = r.get_json()["token"]
+        self.assertEqual(self.status(token)[0]["status"], "pending")
+        self.assertIn("confirm?token=", self.mails[0][2])
+
+        # opening the link (GET) must not confirm: mail scanners open links
+        self.client.get(f"/confirm?token={self.confirm_token()}")
+        self.assertEqual(self.status(token)[0]["status"], "pending")
+
+        r = self.client.post("/confirm", data={"token": self.confirm_token()})
+        self.assertIn(b"Alert confirmed", r.data)
+        self.assertEqual(self.status(token)[0]["status"], "active")
+
+        # the confirmation link works only once
+        r = self.client.post("/confirm", data={"token": self.confirm_token()})
+        self.assertIn(b"Link not valid", r.data)
+
+    def test_consent_required(self):
+        self.assertEqual(self.signup(consent=False).status_code, 400)
+        self.assertEqual(self.mails, [])
+
+    def test_repeat_signup_does_not_leak_token_and_throttles_mails(self):
+        self.signup()
+        r = self.signup()
+        self.assertEqual(r.get_json(), {"status": "pending"})
+        self.assertEqual(len(self.mails), 1)  # re-send only after RESEND_GAP
+
+    def test_delete_needs_token(self):
+        token = self.signup().get_json()["token"]
+        self.assertEqual(self.client.delete("/api/alerts", json={"token": "wrong"}).status_code, 404)
+        self.assertEqual(self.client.delete("/api/alerts", json={"token": token}).status_code, 200)
+        self.assertEqual(self.status(token), [])
+
+    def test_unsubscribe_needs_post(self):
+        token = self.signup().get_json()["token"]
+        self.client.get(f"/unsubscribe?token={token}")
+        self.assertEqual(len(self.status(token)), 1)
+        self.client.post("/unsubscribe", data={"token": token})
+        self.assertEqual(self.status(token), [])
+
+    def test_unconfirmed_signups_expire(self):
+        token = self.signup().get_json()["token"]
+        old = (datetime.now() - web.CONFIRM_TTL - timedelta(minutes=1)).isoformat(timespec="seconds")
+        with web.db() as c:
+            c.execute("UPDATE alerts SET created_at=?", (old,))
+        web.delete_unconfirmed()
+        self.assertEqual(self.status(token), [])
+
+    def test_rate_limit(self):
+        for i in range(web.SIGNUPS_PER_IP_PER_HOUR):
+            self.assertEqual(self.signup(f"u{i}@b.de").status_code, 201)
+        self.assertEqual(self.signup("one-more@b.de").status_code, 429)
+
+    def test_legal_pages_render(self):
+        for path in ("/imprint", "/privacy", "/"):
+            self.assertEqual(self.client.get(path).status_code, 200, path)
 
 
 class StatsTests(unittest.TestCase):

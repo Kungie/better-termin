@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Privacy · Better Termin{% endblock %}
+{% block content %}
+  <main class="content legal">
+    <h1>Privacy policy</h1>
+    {% if not op.configured %}
+      <p class="note">The operator details are not configured yet. Set them in <code>.env</code> before publishing this site.</p>
+    {% endif %}
+
+    <h2>1. Who is responsible</h2>
+    <p>
+      {{ op.name or "[name]" }}<br>
+      {% for line in op.address_lines %}{{ line }}<br>{% else %}[address]<br>{% endfor %}
+      E-mail: {% if op.email %}<a href="mailto:{{ op.email }}">{{ op.email }}</a>{% else %}[e-mail]{% endif %}
+    </p>
+
+    <h2>2. Visiting the site</h2>
+    <p>This app does not use cookies, analytics or tracking, and it does not log IP addresses. Fonts and styles are served from this server, so no data is sent to third parties such as Google when you open the page.</p>
+    <p>To deliver the page, the hosting provider{% if op.hosting %} ({{ op.hosting }}){% endif %} processes technical data such as your IP address. This is necessary to run the site (Art. 6(1)(f) GDPR). For how long the provider keeps such logs, see its privacy policy.</p>
+    <p>To limit abuse of the alert sign-up, the app keeps the IP addresses of sign-up requests <strong>in memory only, for at most one hour</strong>. They are never written to disk (Art. 6(1)(f) GDPR).</p>
+    <p>Your browser's local storage keeps the e-mail address you last entered, the alerts you created on this device and which categories you expanded. This data stays on your device, is only used to provide these functions, and can be deleted at any time by clearing the site data in your browser.</p>
+
+    <h2>3. E-mail alerts</h2>
+    <p>If you set an alert, we store your <strong>e-mail address</strong>, the <strong>category</strong>, when you signed up, when you confirmed and when we last sent you an alert. We use this data only to e-mail you when a slot opens or an earlier slot appears in that category.</p>
+    <ul>
+      <li><strong>Legal basis:</strong> your consent (Art. 6(1)(a) GDPR).</li>
+      <li><strong>Double opt-in:</strong> we first send a confirmation e-mail. The alert only starts once you click the link in it. Unconfirmed sign-ups are deleted automatically after 48 hours.</li>
+      <li><strong>Withdrawing consent:</strong> every alert e-mail contains a link that removes the alert immediately. You can also remove it on the site or write to us. Removing an alert deletes its data.</li>
+      <li><strong>Storage:</strong> until you remove the alert.</li>
+      <li><strong>Recipients:</strong> the hosting provider{% if op.hosting %} ({{ op.hosting }}){% endif %} and the e-mail delivery provider{% if op.mail %} ({{ op.mail }}){% endif %} process the data on our behalf. We do not share it with anyone else and do not use it for advertising.</li>
+    </ul>
+
+    <h2>4. Your rights</h2>
+    <p>You have the right to access (Art. 15), rectification (Art. 16), erasure (Art. 17), restriction of processing (Art. 18), data portability (Art. 20) and to object (Art. 21). To use them, write to the e-mail address above.</p>
+    <p>You can also complain to a data protection supervisory authority, for example the <a href="https://www.ldi.nrw.de/" target="_blank" rel="noopener">Landesbeauftragte für Datenschutz und Informationsfreiheit Nordrhein-Westfalen (LDI NRW)</a>.</p>
+  </main>
+{% endblock %}
