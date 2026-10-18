@@ -2,11 +2,11 @@ name: Termin Bot
 
 on:
   schedule:
-    # Her 15 dakikada bir (UTC). GitHub zamanlanmış çalıştırmaları gecikebilir.
+    # Every 15 minutes (UTC). GitHub may delay scheduled runs.
     - cron: "*/15 * * * *"
   workflow_dispatch:
 
-# Aynı anda tek çalıştırma: state.json'un üzerine yazılmasını önler.
+# One run at a time so state.json isn't overwritten.
 concurrency:
   group: termin-bot
   cancel-in-progress: false
@@ -33,7 +33,7 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Bir önceki çalıştırmanın state.json dosyasını geri yükle (en yeni cache).
+      # Restore state.json from the previous run (newest cache).
       - name: Restore state
         uses: actions/cache/restore@v6
         with:

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Aachen Ausländeramt termin takip botu.
+"""Aachen Ausländeramt appointment tracker.
 
-https://termine.staedteregion-aachen.de/auslaenderamt/ sitesindeki tüm
-kategorilerin (Anliegen) en yakın boş termin tarihlerini takip eder ve
-daha erken bir termin açıldığında bildirim gönderir.
+Tracks the earliest free appointment for every category (Anliegen) on
+https://termine.staedteregion-aachen.de/auslaenderamt/ and sends a
+notification when an earlier slot opens up.
 
-Bot sadece okuma yapar, termin rezerve etmez.
+The bot only reads; it never books an appointment.
 """
 
 from __future__ import annotations
@@ -165,7 +165,7 @@ def fetch_categories() -> list[Category]:
     r.raise_for_status()
     categories = parse_categories(r.text)
     if not categories:
-        raise RuntimeError("Kategori listesi bulunamadı - site yapısı değişmiş olabilir.")
+        raise RuntimeError("Category list not found - the site structure may have changed.")
     return categories
 
 
@@ -183,7 +183,7 @@ def check_category(category: Category) -> list[Result]:
         # Some categories may skip the location step and land directly on suggest.
         if "suggest" in r.url:
             return [Result(category, parse_location_name(r.text), earliest=parse_first_slot(r.text))]
-        return [Result(category, "", error=f"Standort bulunamadı: {page_title(r.text)}")]
+        return [Result(category, "", error=f"No location found: {page_title(r.text)}")]
 
     results = []
     for i, form in enumerate(locations):
@@ -221,12 +221,12 @@ def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
 
 
-WEEKDAYS_TR = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def fmt_date(iso: str) -> str:
     d = datetime.strptime(iso, "%Y-%m-%d")
-    return f"{d:%d.%m.%Y} ({WEEKDAYS_TR[d.weekday()]})"
+    return f"{d:%d.%m.%Y} ({WEEKDAYS[d.weekday()]})"
 
 
 def notify(title: str, message: str) -> None:
@@ -242,7 +242,7 @@ def notify(title: str, message: str) -> None:
                 timeout=30,
             ).raise_for_status()
         except requests.RequestException as e:
-            print(f"Telegram bildirimi gönderilemedi: {e}", file=sys.stderr)
+            print(f"Could not send Telegram notification: {e}", file=sys.stderr)
 
     if sys.platform == "darwin" and not os.environ.get("NO_MAC_NOTIFY"):
         script = f"display notification {json.dumps(message[:200])} with title {json.dumps(title)} sound name \"Glass\""
@@ -267,26 +267,26 @@ def diff_and_notify(results: list[Result], state: dict, first_run: bool) -> dict
             "checked_at": datetime.now().isoformat(timespec="seconds"),
         }
         if current and (prev is None or current < prev) and not first_run:
-            was = f"(önceki: {prev})" if prev else "(önceden boş termin yoktu)"
+            was = f"(was: {prev})" if prev else "(no free slots before)"
             improvements.append(
                 f"• {res.category.name}: {fmt_date(earliest.date)} {earliest.time} {was}"
             )
     if improvements:
-        notify("Aachen Ausländeramt: daha erken termin!", "\n".join(improvements))
+        notify("Aachen Ausländeramt: earlier appointment!", "\n".join(improvements))
     return new_state
 
 
 def print_table(results: list[Result]) -> None:
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    print(f"\n=== {now} — en yakın terminler ===")
+    print(f"\n=== {now} — earliest appointments ===")
     width = max((len(r.category.name) for r in results), default=20)
     for res in sorted(results, key=lambda r: (r.earliest is None, r.earliest.date if r.earliest else "")):
         if res.error:
-            info = f"HATA: {res.error}"
+            info = f"ERROR: {res.error}"
         elif res.earliest:
             info = f"{fmt_date(res.earliest.date)} {res.earliest.time}"
         else:
-            info = "boş termin yok"
+            info = "no free slots"
         print(f"  [{res.category.id}] {res.category.name:<{width}}  {info}")
     sys.stdout.flush()
 
@@ -306,7 +306,7 @@ def run_once(category_filter: set[str] | None) -> list[Result]:
     for i, cat in enumerate(categories):
         if i:
             time.sleep(REQUEST_DELAY)
-        line = f"Kontrol ediliyor [{i + 1}/{len(categories)}] {cat.name}"
+        line = f"Checking [{i + 1}/{len(categories)}] {cat.name}"
         print(f"\r\033[K{line[:100]}" if tty else line, end="" if tty else "\n", file=sys.stderr, flush=True)
         try:
             results.extend(check_category(cat))
@@ -319,16 +319,16 @@ def run_once(category_filter: set[str] | None) -> list[Result]:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--list", action="store_true", help="kategorileri ve ID'lerini listele")
-    p.add_argument("--once", action="store_true", help="tek sefer kontrol et ve çık")
-    p.add_argument("--interval", type=int, default=300, help="kontrol aralığı (saniye, varsayılan 300)")
-    p.add_argument("--categories", help="sadece bu kategori ID'leri, virgülle (örn. 344,346)")
-    p.add_argument("--json", action="store_true", help="sonuçları JSON olarak yazdır (--once ile)")
-    p.add_argument("--test-notify", action="store_true", help="test bildirimi gönder ve çık")
+    p.add_argument("--list", action="store_true", help="list categories and their IDs")
+    p.add_argument("--once", action="store_true", help="check once and exit")
+    p.add_argument("--interval", type=int, default=300, help="check interval in seconds (default 300)")
+    p.add_argument("--categories", help="only these category IDs, comma-separated (e.g. 344,346)")
+    p.add_argument("--json", action="store_true", help="print results as JSON (with --once)")
+    p.add_argument("--test-notify", action="store_true", help="send a test notification and exit")
     args = p.parse_args()
 
     if args.test_notify:
-        notify("Aachen Termin Bot", "Test bildirimi — bildirimler çalışıyor ✅")
+        notify("Better Termin", "Test notification — notifications are working ✅")
         return
 
     if args.list:
@@ -344,7 +344,7 @@ def main() -> None:
         try:
             results = run_once(category_filter)
         except (requests.RequestException, RuntimeError) as e:
-            print(f"Kontrol başarısız: {e}", file=sys.stderr)
+            print(f"Check failed: {e}", file=sys.stderr)
             results = None
 
         if results is not None:
@@ -360,7 +360,7 @@ def main() -> None:
         if args.once:
             break
         next_check = datetime.fromtimestamp(time.time() + interval).strftime("%H:%M:%S")
-        print(f"Sonraki kontrol: {next_check} (durdurmak için Ctrl+C)", file=sys.stderr, flush=True)
+        print(f"Next check: {next_check} (Ctrl+C to stop)", file=sys.stderr, flush=True)
         time.sleep(interval)
 
 
@@ -368,4 +368,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nDurduruldu.")
+        print("\nStopped.")

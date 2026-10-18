@@ -1,88 +1,88 @@
-# Aachen Termin Bot
+# Better Termin
 
-[Städteregion Aachen Ausländeramt](https://termine.staedteregion-aachen.de/auslaenderamt/) termin sitesindeki **tüm kategorilerin** en yakın boş termin tarihlerini takip eder. Bir kategoride daha erken bir termin açıldığında bildirim gönderir (terminal + macOS bildirimi + isteğe bağlı Telegram).
+Tracks the earliest free appointment for **every category** on the [Städteregion Aachen Ausländeramt](https://termine.staedteregion-aachen.de/auslaenderamt/) booking site, and notifies you when an earlier slot opens up in a category (terminal + macOS notification + optional Telegram).
 
-Bot sadece okuma yapar, **termin rezerve etmez** — termini siteden kendin almalısın.
+The bot only reads. It **never books an appointment**, so you still book it yourself on the site.
 
-## Kurulum
+## Setup
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-## Web arayüzü
+## Web UI
 
 ```bash
 .venv/bin/python web.py
 ```
 
-Sonra tarayıcıda **http://127.0.0.1:8000** adresini aç. Arayüz termin sitesinin temasındadır ve şunları gösterir:
+Then open **http://127.0.0.1:8000** in your browser. The UI uses the booking site's theme and shows:
 
-- **Termin varsa:** en yakın tarih ve saat (kaç gün sonra olduğu, takipte açıldığı görüldüyse ne zaman açıldığı).
-- **Termin yoksa:** yeni termin açılma sıklığı — ortalama kaç saatte/günde bir açıldığı, son açılma zamanı, genelde hangi saatte açıldığı, açık kalma süresi. Bu istatistikler uygulamanın **takip başladığından beri gözlediği** değişikliklere dayanır; ilk günlerde "veri toplanıyor" görünür.
-- **E-posta alarmı** butonu: kategori için e-posta adresi kaydeder. Kayıtlar `data/termin.db` içinde saklanır. ⚠️ E-posta *gönderimi* henüz bağlı değil (`web.py` içindeki `send_email` şimdilik sadece log yazar); hosting kurulunca SMTP/servis ile bağlanacak.
+- **When a slot is available:** the earliest date and time, how many days away it is, and when it opened (if the app saw it open).
+- **When nothing is available:** how often new slots open: the average interval, when one last opened, the usual hour of day, and how long slots stay open. These stats come from the changes the app **has observed since tracking started**, so for the first few days the page shows that it is still collecting data.
+- An **e-mail alert** button: saves an e-mail address for a category in `data/termin.db`. ⚠️ E-mail *delivery* is not wired up yet: `send_email` in `web.py` only logs for now. It will be connected to SMTP or a mail service once hosting is set up.
 
-Arka planda varsayılan olarak 5 dakikada bir tüm kategoriler kontrol edilir (`--interval 600` ile değiştirilebilir, `--port` ile port). "Şimdi kontrol et" butonu en fazla dakikada bir çalışır. Geçmiş `data/termin.db` (SQLite) dosyasında tutulur — silersen istatistikler sıfırlanır.
+By default, the app checks all categories in the background every 5 minutes. Use `--interval 600` to change that and `--port` to change the port. The "Check now" button runs at most once a minute. History is stored in `data/termin.db` (SQLite), and deleting that file resets the stats.
 
-Testler: `.venv/bin/python -m unittest test_web`
+Tests: `.venv/bin/python -m unittest test_web`
 
-## Komut satırı
+## Command line
 
-Kategorileri ve ID'lerini listele:
+List categories and their IDs:
 
 ```bash
 .venv/bin/python termin_bot.py --list
 ```
 
-Tek seferlik kontrol (tüm kategoriler):
+Check all categories once:
 
 ```bash
 .venv/bin/python termin_bot.py --once
 ```
 
-Sürekli takip (varsayılan her 5 dakikada bir):
+Keep tracking (every 5 minutes by default):
 
 ```bash
 .venv/bin/python termin_bot.py
 ```
 
-Sadece belirli kategoriler, 10 dakikada bir:
+Only some categories, every 10 minutes:
 
 ```bash
 .venv/bin/python termin_bot.py --categories 344,346 --interval 600
 ```
 
-Örnek çıktı:
+Example output:
 
 ```
-=== 18.10.2026 06:38:22 — en yakın terminler ===
-  [345] Freizügigkeit/ Daueraufenthaltsbescheinigung   21.10.2026 (Çar) 09:30
-  [346] FH Studenten                                   25.11.2026 (Çar) 08:30
-  [344] RWTH Studenten                                 boş termin yok
+=== 18.10.2026 06:38:22 — earliest appointments ===
+  [345] Freizügigkeit/ Daueraufenthaltsbescheinigung   21.10.2026 (Wed) 09:30
+  [346] FH Studenten                                   25.11.2026 (Wed) 08:30
+  [344] RWTH Studenten                                 no free slots
 ```
 
-### Seçenekler
+### Options
 
-| Seçenek | Açıklama |
+| Option | Description |
 |---|---|
-| `--list` | Kategorileri ve ID'lerini listeler |
-| `--once` | Bir kez kontrol eder ve çıkar |
-| `--interval N` | Kontrol aralığı, saniye (varsayılan 300, en az 60) |
-| `--categories 344,346` | Sadece bu kategori ID'lerini takip eder |
-| `--json` | Sonuçları JSON olarak yazdırır |
-| `--test-notify` | Test bildirimi gönderir |
+| `--list` | List categories and their IDs |
+| `--once` | Check once and exit |
+| `--interval N` | Check interval in seconds (default 300, minimum 60) |
+| `--categories 344,346` | Only track these category IDs |
+| `--json` | Print results as JSON |
+| `--test-notify` | Send a test notification |
 
-## Bildirimler
+## Notifications
 
-Bot her kontrolde en yakın tarihi `state.json` dosyasına kaydeder. Bir sonraki kontrolde bir kategoride **daha erken** bir termin çıkarsa (veya hiç termin yokken termin açılırsa) bildirim gönderir. İlk çalıştırmada bildirim gönderilmez, sadece başlangıç durumu kaydedilir.
+On every check, the command-line bot saves the earliest date per category to `state.json`. If a later check finds an **earlier** slot in a category, or a slot opens where there was none, it sends a notification. The first run sends nothing and only records the baseline.
 
-- **Terminal:** her zaman.
-- **macOS bildirimi:** macOS'ta otomatik. Kapatmak için `NO_MAC_NOTIFY=1`.
-- **Telegram (isteğe bağlı):**
-  1. Telegram'da [@BotFather](https://t.me/BotFather) ile bot oluştur, token'ı al.
-  2. Bota bir mesaj at, sonra `https://api.telegram.org/bot<TOKEN>/getUpdates` adresinden `chat.id` değerini bul.
-  3. Ortam değişkenleriyle çalıştır:
+- **Terminal:** always.
+- **macOS notification:** automatic on macOS. Set `NO_MAC_NOTIFY=1` to turn it off.
+- **Telegram (optional):**
+  1. Create a bot with [@BotFather](https://t.me/BotFather) on Telegram and get its token.
+  2. Send your bot a message, then find `chat.id` at `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+  3. Run with these environment variables:
 
      ```bash
      export TELEGRAM_BOT_TOKEN="..."
@@ -90,17 +90,17 @@ Bot her kontrolde en yakın tarihi `state.json` dosyasına kaydeder. Bir sonraki
      .venv/bin/python termin_bot.py --test-notify
      ```
 
-## GitHub Actions ile otomatik çalıştırma
+## Running on GitHub Actions
 
-Bilgisayarın kapalıyken de takip için [`.github/workflows/termin-bot.yml`](.github/workflows/termin-bot.yml) botu GitHub sunucularında **her 15 dakikada bir** `python termin_bot.py --once` ile çalıştırır. `state.json` çalıştırmalar arasında GitHub Actions cache'inde saklanır, böylece daha erken termin tespiti çalışmaya devam eder. Bildirimler Telegram üzerinden gelir (macOS bildirimi kapalıdır).
+To keep tracking while your computer is off, [`.github/workflows/termin-bot.yml`](.github/workflows/termin-bot.yml) runs `python termin_bot.py --once` on GitHub's servers **every 15 minutes**. `state.json` is kept in the GitHub Actions cache between runs, so earlier-slot detection keeps working. Notifications arrive via Telegram, and macOS notifications are off there.
 
-Kurulum:
+Setup:
 
-1. Repo sayfasında **Settings → Secrets and variables → Actions → New repository secret** ile iki secret ekle:
-   - `TELEGRAM_BOT_TOKEN` — BotFather'dan aldığın token
-   - `TELEGRAM_CHAT_ID` — yukarıda bulduğun `chat.id`
+1. On the repo page, go to **Settings → Secrets and variables → Actions → New repository secret** and add two secrets:
+   - `TELEGRAM_BOT_TOKEN`: the token from BotFather
+   - `TELEGRAM_CHAT_ID`: the `chat.id` you found above
 
-   veya terminalden:
+   Or from the terminal:
 
    ```bash
    gh secret set TELEGRAM_BOT_TOKEN
@@ -110,26 +110,29 @@ Kurulum:
    gh secret set TELEGRAM_CHAT_ID
    ```
 
-2. **Actions** sekmesinde workflow'ların açık olduğundan emin ol. Zamanlanmış çalıştırma kendiliğinden başlar.
-3. Elle çalıştırmak için: Actions → **Termin Bot** → **Run workflow**, veya:
+2. Make sure workflows are enabled on the **Actions** tab. Scheduled runs start on their own.
+3. To run it manually, go to Actions → **Termin Bot** → **Run workflow**, or run:
 
    ```bash
    gh workflow run termin-bot.yml
    ```
 
-Notlar:
+Notes:
 
-- İlk çalıştırma (veya cache silindiğinde/7 gün kullanılmadığında) sadece başlangıç durumunu kaydeder, bildirim göndermez.
-- GitHub zamanlanmış çalıştırmaları garanti etmez; yoğun saatlerde birkaç dakika (bazen daha fazla) gecikebilir veya atlanabilir.
-- **Dakika kotası:** Özel (private) repolarda ücretsiz hesapta ayda 2000 Actions dakikası var. Bir çalıştırma ~1,5 dakika sürüyor ve 2 dakika olarak sayılıyor; her 15 dakikada bir çalıştırma ayda ~5800 dakika eder, yani kota ayın ortasından önce biter ve bot durur. Çözümler: repoyu public yapmak (public repolarda dakika sınırsız), sıklığı azaltmak (`cron: "0 * * * *"` = saatte bir, ~1450 dk/ay) veya workflow'daki komuta `--categories 344,346` ekleyip sadece ilgilendiğin kategorileri takip etmek (çalıştırma 1 dakikanın altına iner; `cron: "*/30 * * * *"` ile birlikte ~1450 dk/ay).
-- Durdurmak için: Actions → Termin Bot → **⋯ → Disable workflow**.
+- The first run sends nothing and only records the baseline. The same happens after the cache is deleted or goes unused for 7 days.
+- GitHub doesn't guarantee scheduled runs. At busy times they can be delayed by a few minutes (sometimes more) or skipped.
+- **Minutes quota:** private repos on a free account get 2,000 Actions minutes a month. One run takes about 1.5 minutes and is billed as 2. Running every 15 minutes uses about 5,800 minutes a month, so the quota runs out before mid-month and the bot stops. You can fix this in three ways:
+  - Make the repo public. Public repos have unlimited minutes.
+  - Run less often. `cron: "0 * * * *"` runs hourly and uses about 1,450 minutes a month.
+  - Track only the categories you need by adding `--categories 344,346` to the workflow command. Each run then takes under a minute, and with `cron: "*/30 * * * *"` it uses about 1,450 minutes a month.
+- To stop it, go to Actions → Termin Bot → **⋯ → Disable workflow**.
 
-## Nasıl çalışır
+## How it works
 
-Site TEVIS randevu sistemini kullanıyor. Bot her kategori için tarayıcının izlediği adımları taklit eder:
+The site runs the TEVIS appointment system. For each category, the bot follows the same steps as a browser:
 
-1. `select2?md=1` — kategori listesi (Anliegen) okunur, yeni kategoriler otomatik eklenir.
-2. `location?...&cnc-<ID>=1` — kategori seçilir, standort formu okunur.
-3. Standort POST edilir → `suggest` sayfası; buradaki her `suggestion_form` boş bir saat demektir (dolu saatler `disabled` buton olarak görünür). Günler tarih sırasıyla listelendiği için sayfa **sadece ilk boş saate kadar** okunur ve bağlantı kesilir — birkaç MB'lık sayfaların tamamı indirilmez.
+1. `select2?md=1`: read the category list (Anliegen). New categories are picked up automatically.
+2. `location?...&cnc-<ID>=1`: select the category and read the location form.
+3. POST the location to get the `suggest` page. Each `suggestion_form` on it is a free slot, and taken slots show as `disabled` buttons. Days are listed in date order, so the bot reads the page **only up to the first free slot** and then closes the connection instead of downloading pages that are several MB.
 
-Sunucuyu yormamak için kategoriler arasında 1 saniye beklenir ve kontrol aralığı en az 60 saniyedir.
+To go easy on the server, the bot waits 1 second between categories, and the check interval is at least 60 seconds.

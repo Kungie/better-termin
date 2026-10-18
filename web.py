@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Aachen Termin Bot — web arayüzü.
+"""Better Termin — web UI.
 
-Arka planda tüm kategorileri düzenli olarak kontrol eder, her kategorinin en
-yakın termin tarihini ve geçmişini SQLite'a kaydeder, ve bunları tarayıcıda
-gösterir:
+Checks all categories regularly in the background, stores each category's
+earliest appointment and its history in SQLite, and shows in the browser:
 
-  * termin varsa en yakın tarih,
-  * yoksa yeni termin açılma sıklığı (takip başladığından beri gözlenen),
-  * her kategori için e-posta alarmı kaydı.
+  * the earliest slot when one is available,
+  * otherwise how often new slots open (as observed since tracking started),
+  * an e-mail alert sign-up per category.
 
-Çalıştırma:  .venv/bin/python web.py   →  http://127.0.0.1:8000
+Run:  .venv/bin/python web.py   →  http://127.0.0.1:8000
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ import termin_bot as bot
 
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "termin.db"
-MIN_REFRESH_GAP = 60  # seconds; "Şimdi kontrol et" can't hammer the site
+MIN_REFRESH_GAP = 60  # seconds; "Check now" can't hammer the site
 
 app = Flask(__name__, static_folder=None)
 
@@ -133,7 +132,7 @@ class Checker:
                 self.last_error = None
             except (requests.RequestException, RuntimeError) as e:
                 self.last_error = str(e)
-                print(f"Kontrol başarısız: {e}", file=sys.stderr)
+                print(f"Check failed: {e}", file=sys.stderr)
             finally:
                 with self.lock:
                     self.progress["running"] = False
@@ -227,20 +226,20 @@ def send_email(to: str, subject: str, body: str) -> None:
 
     Replace this with an SMTP / provider call (SendGrid, SES, Mailgun, ...).
     """
-    print(f"[e-posta henüz yapılandırılmadı] {to}: {subject}", file=sys.stderr)
+    print(f"[e-mail not configured yet] {to}: {subject}", file=sys.stderr)
 
 
 def notify_subscribers(cat: bot.Category, earliest: str, kind: str) -> None:
     date, hhmm = earliest.split()
-    what = "termin açıldı" if kind == "opened" else "daha erken termin açıldı"
+    what = "a slot opened" if kind == "opened" else "an earlier slot opened"
     subject = f"{cat.name}: {what} — {bot.fmt_date(date)} {hhmm}"
     with db() as c:
         subs = c.execute("SELECT * FROM alerts WHERE cat_id=?", (cat.id,)).fetchall()
         for sub in subs:
             body = (
-                f"{cat.name} için {what}.\n\nEn yakın termin: {bot.fmt_date(date)} {hhmm}\n\n"
-                f"Termin almak için: {bot.BASE_URL}\n\n"
-                f"Alarmı kaldırmak için: {request_base()}unsubscribe?token={sub['token']}\n"
+                f"{cat.name}: {what}.\n\nEarliest appointment: {bot.fmt_date(date)} {hhmm}\n\n"
+                f"Book it here: {bot.BASE_URL}\n\n"
+                f"Remove this alert: {request_base()}unsubscribe?token={sub['token']}\n"
             )
             send_email(sub["email"], subject, body)
             c.execute("UPDATE alerts SET last_notified_at=? WHERE id=?", (now_iso(), sub["id"]))
@@ -357,10 +356,10 @@ def api_alerts_create():
     email = str(data.get("email", "")).strip().lower()
     cat_id = str(data.get("category_id", ""))
     if not EMAIL_RE.match(email) or len(email) > 254:
-        return jsonify({"error": "Geçerli bir e-posta adresi gir."}), 400
+        return jsonify({"error": "Please enter a valid e-mail address."}), 400
     with db() as c:
         if not c.execute("SELECT 1 FROM categories WHERE id=?", (cat_id,)).fetchone():
-            return jsonify({"error": "Bilinmeyen kategori."}), 400
+            return jsonify({"error": "Unknown category."}), 400
         c.execute(
             "INSERT OR IGNORE INTO alerts (email, cat_id, token, created_at) VALUES (?,?,?,?)",
             (email, cat_id, secrets.token_urlsafe(24), now_iso()),
@@ -381,23 +380,25 @@ def api_alerts_delete():
 def unsubscribe():
     with db() as c:
         n = c.execute("DELETE FROM alerts WHERE token=?", (request.args.get("token", ""),)).rowcount
-    msg = "Alarm kaldırıldı." if n else "Bu alarm bulunamadı (zaten kaldırılmış olabilir)."
-    return f"<!doctype html><meta charset=utf-8><title>Alarm</title><p style='font-family:sans-serif'>{msg}</p>"
+    msg = "Alert removed." if n else "Alert not found (it may already have been removed)."
+    return f"<!doctype html><meta charset=utf-8><title>Alert</title><p style='font-family:sans-serif'>{msg}</p>"
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Aachen Termin Bot web arayüzü")
+    p = argparse.ArgumentParser(description="Better Termin web UI")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
-    p.add_argument("--interval", type=int, default=300, help="kontrol aralığı, saniye (en az 60)")
+    p.add_argument("--interval", type=int, default=300, help="check interval in seconds (min 60)")
     args = p.parse_args()
 
     init_db()
     checker = Checker(max(args.interval, 60))
+    with db() as c:  # survive restarts: show the last check from history
+        checker.last_check = c.execute("SELECT MAX(ok_at) FROM status").fetchone()[0]
     app.config["CHECKER"] = checker
     app.config["PUBLIC_URL"] = f"http://{args.host}:{args.port}/"
     checker.start()
-    print(f"Arayüz: http://{args.host}:{args.port}", flush=True)
+    print(f"UI: http://{args.host}:{args.port}", flush=True)
     app.run(host=args.host, port=args.port, threaded=True, use_reloader=False)
 
 
