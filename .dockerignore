@@ -1,7 +1,6 @@
 .git
 .venv
 .claude
-.github
 data
 __pycache__
 *.pyc

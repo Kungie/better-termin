@@ -38,8 +38,6 @@ Security measures in the app: a strict Content-Security-Policy (no inline script
 
 Prints the earliest slot per category. Leave off `--once` to keep checking, and use `--help` for the other options. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to get Telegram notifications.
 
-A GitHub Actions workflow (`.github/workflows/termin-bot.yml`) runs this every 15 minutes. It needs the two Telegram values as repo secrets.
-
 ## Tests
 
 ```bash
