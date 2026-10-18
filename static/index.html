@@ -21,6 +21,10 @@
     --ok-bg: #e8f3e8;
     --none-bg: #f6f6f6;
     --disabled: #8aa0c9;
+    /* Stadt Aachen serviceportal yellow */
+    --yellow: #e4c42b;
+    --yellow-dark: #c3a619;
+    --on-yellow: #353535;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -79,11 +83,6 @@
   .progress.on { display: block; }
 
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
-  .seg { display: inline-flex; border: 1px solid var(--blue); }
-  .seg button { background: #fff; color: var(--blue); border: 0; font: inherit; font-size: 14px;
-    padding: 6px 12px; cursor: pointer; }
-  .seg button + button { border-left: 1px solid var(--blue); }
-  .seg button[aria-pressed="true"] { background: var(--blue); color: #fff; }
   .toolbar .hint { font-size: 14px; color: var(--muted); }
 
   .group { margin-bottom: 4px; }
@@ -91,6 +90,10 @@
   .group-head .gname { flex: 1; }
   .group-head .cnt { font-size: 14px; opacity: .9; text-align: right; }
   .group-head:hover { background: var(--navy); }
+  .group.yellow > .group-head { background: var(--yellow); color: var(--on-yellow); border-color: var(--yellow-dark); }
+  .group.yellow > .group-head:hover { background: var(--yellow-dark); }
+  .group.yellow a.btn.outline { color: var(--on-yellow); border-color: var(--yellow-dark); }
+  .group.yellow a.btn.outline:hover { background: #fbf4d2; }
   .group:not([open]) + .group { margin-top: -3px; }
   .rows { list-style: none; margin: 0 0 14px; padding: 0; border: 1px solid var(--line); border-top: 0; }
   .row { display: grid; grid-template-columns: minmax(180px, 1.1fr) 1.4fr auto; gap: 8px 18px;
@@ -148,13 +151,13 @@
 </head>
 <body>
   <div class="topbar"><div class="inner">
-    <span class="t">Ausländer- und Staatsangehörigkeitsbehörde Aachen</span>
+    <span class="t">Better Termin</span>
     <span class="tag">unofficial</span>
   </div></div>
 
   <div class="brand"><div class="name">
     <div class="arc" aria-hidden="true"></div>
-    <h2>Better Termin<small>Ausländeramt Aachen</small></h2>
+    <h2>Better Termin<small>Unofficial tracking site</small></h2>
   </div></div>
 
   <main class="content">
@@ -177,11 +180,6 @@
     <div class="progress" id="progress" role="progressbar" aria-label="Check progress"><div></div></div>
 
     <div class="toolbar">
-      <div class="seg" role="group" aria-label="Filter">
-        <button data-f="all" aria-pressed="true">All</button>
-        <button data-f="yes" aria-pressed="false">Available</button>
-        <button data-f="no" aria-pressed="false">Not available</button>
-      </div>
       <span class="hint" id="hint"></span>
     </div>
 
@@ -189,7 +187,6 @@
   </main>
 
   <footer>
-    <a id="book" href="https://termine.staedteregion-aachen.de/auslaenderamt/" target="_blank" rel="noopener">Go to the booking site</a>
     <a href="https://github.com/Kungie/better-termin" target="_blank" rel="noopener">GitHub</a>
     <p>Data is read regularly from the official booking site. Opening frequency is based on the changes this app has observed since tracking started.</p>
   </footer>
@@ -215,7 +212,7 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-let data = null, filter = "all", myAlerts = new Set(), timer = null;
+let data = null, myAlerts = new Set(), timer = null;
 // Groups start collapsed; the ones the viewer opens are remembered.
 let openGroups = new Set();
 try { openGroups = new Set(JSON.parse(load("openGroups") || "[]")); } catch {}
@@ -280,11 +277,22 @@ function rowHtml(c) {
   }
   const on = myAlerts.has(c.id);
   return `<li class="row">
-    <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0])}</div></div>
+    <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0].replace(/^Ausländeramt Aachen\s*-\s*/, ""))}</div></div>
     <div>${status}</div>
     <div class="alert">
       <button class="btn small ${on ? "on" : ""}" data-alert="${esc(c.id)}">${on ? "✓ Alert set" : "🔔 E-mail alert"}</button>
       <a class="btn small outline" href="${esc(data.booking_url)}" target="_blank" rel="noopener" title="Opens the booking site; pick “${esc(c.name)}” there">Go to site ↗</a>
+    </div>
+  </li>`;
+}
+
+function linkOnlyRowHtml(c) {
+  return `<li class="row">
+    <div><div class="cat">${esc(c.name)}</div><div class="loc">${esc(c.location)}</div></div>
+    <div><span class="badge none">Not tracked</span>
+      <div class="freq">${esc(c.release)}</div><div class="sub">${esc(c.note)}</div></div>
+    <div class="alert">
+      <a class="btn small outline" href="${esc(c.url)}" target="_blank" rel="noopener">Go to site ↗</a>
     </div>
   </li>`;
 }
@@ -304,7 +312,6 @@ function render() {
   $("#s-last").textContent = data.last_check ? `${fmtTime(data.last_check)} (${ago(data.last_check)})` : "not yet";
   $("#s-next").textContent = data.progress.running ? "checking now" : (data.next_check ? fmtTime(data.next_check) : "–");
   $("#s-since").textContent = fmtDT(data.tracking_since);
-  $("#book").href = data.booking_url;
 
   const p = data.progress, bar = $("#progress");
   bar.classList.toggle("on", p.running);
@@ -314,9 +321,8 @@ function render() {
 
   if (!cats.length) { $("#list").innerHTML = `<div class="empty">Running the first check…</div>`; return; }
 
-  const shown = cats.filter(c => filter === "all" || (filter === "yes") === !!c.earliest);
   const groups = [];
-  for (const c of shown) {
+  for (const c of cats) {
     let g = groups.find(g => g.name === c.group);
     if (!g) groups.push(g = { name: c.group, items: [] });
     g.items.push(c);
@@ -326,7 +332,12 @@ function render() {
       <summary class="group-head"><span class="gname">${esc(g.name)}</span>
         <span class="cnt">${groupSummary(g.items)}</span></summary>
       <ul class="rows">${g.items.map(rowHtml).join("")}</ul>
-    </details>`).join("") : `<div class="empty">No categories match this filter.</div>`;
+    </details>`).join("") + (data.link_only_groups || []).map(g => `
+    <details class="group ${esc(g.theme)}" data-group="${esc(g.name)}" ${openGroups.has(g.name) ? "open" : ""}>
+      <summary class="group-head"><span class="gname">${esc(g.name)}</span>
+        <span class="cnt">link only</span></summary>
+      <ul class="rows">${g.items.map(linkOnlyRowHtml).join("")}</ul>
+    </details>`).join("") : "";
 }
 
 async function refreshStatus() {
@@ -358,13 +369,6 @@ $("#list").addEventListener("toggle", (e) => {
   e.target.open ? openGroups.add(g) : openGroups.delete(g);
   store("openGroups", JSON.stringify([...openGroups]));
 }, true);
-
-// ---- filter
-document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
-  filter = b.dataset.f;
-  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x === b));
-  render();
-}));
 
 // ---- manual refresh
 $("#refresh").addEventListener("click", async () => {
