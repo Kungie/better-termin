@@ -95,6 +95,8 @@ details[open] > summary::before { content: "▾"; }
 .freq b { color: var(--text); }
 .row .alert { justify-self: end; display: flex; gap: 8px; }
 a.btn { text-decoration: none; display: inline-block; text-align: center; }
+.btn .icon { width: 16px; height: 16px; margin-right: 7px; vertical-align: -3px;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .btn.on { background: var(--ok); }
 .btn.pending { background: #9a6a00; }
 .btn.pending:hover { background: #7a5400; }

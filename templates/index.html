@@ -54,6 +54,13 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Line icons (24×24, drawn with the button's text colour)
+const icon = (paths) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+const ICONS = {
+  bell: icon('<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
+  check: icon('<path d="M20 6 9 17l-5-5"/>'),
+  mail: icon('<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 7 9 6 9-6"/>'),
+};
 let data = null, timer = null;
 // Alerts created in this browser: category id -> {token, status: "pending" | "active"}.
 // Only the tokens are kept locally; the status comes from the server.
@@ -122,7 +129,7 @@ function rowHtml(c) {
     status = `<span class="badge none">No free slots right now</span>${freqHtml(c)}`;
   }
   const a = myAlerts.get(c.id);
-  const label = !a ? "🔔 E-mail alert" : a.status === "active" ? "✓ Alert set" : "✉ Confirm in inbox";
+  const label = !a ? `${ICONS.bell}E-mail alert` : a.status === "active" ? `${ICONS.check}Alert set` : `${ICONS.mail}Confirm in inbox`;
   return `<li class="row">
     <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0].replace(/^Ausländeramt Aachen(\s*-\s*)?/, ""))}</div></div>
     <div>${status}</div>
