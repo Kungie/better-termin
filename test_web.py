@@ -264,6 +264,49 @@ class StatsTests(unittest.TestCase):
         self.assertIsNone(s["last_opened"])
 
 
+class RoundTests(unittest.TestCase):
+    CATS = [bot.Category(str(i), f"cat {i}", "g") for i in range(3)]
+
+    def setUp(self):
+        p = mock.patch.object(bot, "REQUEST_DELAY", 0)
+        p.start(); self.addCleanup(p.stop)
+
+    def test_one_session_for_the_whole_round(self):
+        session = object()
+        with mock.patch.object(bot, "open_flow") as open_flow, \
+             mock.patch.object(bot, "check_category", side_effect=lambda c, s: [bot.Result(c, "x")]) as check:
+            out = list(bot.check_round(self.CATS, session))
+        open_flow.assert_not_called()
+        self.assertEqual([c.id for c, _ in out], ["0", "1", "2"])
+        self.assertTrue(all(call.args[1] is session for call in check.call_args_list))
+
+    def test_retries_on_a_fresh_session_when_the_shared_one_fails(self):
+        fresh = object()
+        calls = []
+        def check(cat, sess):
+            calls.append((cat.id, sess))
+            return [bot.Result(cat, "x", error="Fehler")] if sess is not fresh else [bot.Result(cat, "x")]
+        with mock.patch.object(bot, "open_flow", return_value=(fresh, self.CATS)), \
+             mock.patch.object(bot, "check_category", side_effect=check):
+            out = list(bot.check_round(self.CATS[:2], object()))
+        self.assertTrue(all(not r.error for _, rs in out for r in rs))
+        self.assertEqual([c for c, _ in calls], ["0", "0", "1"])  # retried once, then kept the fresh session
+
+    def test_network_error_opens_a_new_session_for_the_next_category(self):
+        import requests
+        fresh = object()
+        def check(cat, sess):
+            if cat.id == "0":
+                raise requests.ConnectionError("down")
+            return [bot.Result(cat, "x")]
+        with mock.patch.object(bot, "open_flow", return_value=(fresh, self.CATS)) as open_flow, \
+             mock.patch.object(bot, "check_category", side_effect=check):
+            out = list(bot.check_round(self.CATS[:2], object()))
+        self.assertIn("down", out[0][1][0].error)
+        self.assertIsNone(out[1][1][0].error)
+        open_flow.assert_called_once()
+
+
 class ParseTests(unittest.TestCase):
     PAGE = """<h1>Schritt 4</h1>
     <h3 title="Montag, 11.01.2027">Montag, 11.01.2027</h3>

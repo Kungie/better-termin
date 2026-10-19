@@ -159,20 +159,31 @@ def new_session() -> requests.Session:
     return s
 
 
-def fetch_categories() -> list[Category]:
+def open_flow() -> tuple[requests.Session, list[Category]]:
+    """Start a booking-flow session and read the category list.
+
+    The category page (select2) is ~600 KB, so a whole round of checks shares one
+    session and fetches it once instead of once per category.
+    """
     s = new_session()
     r = s.get(BASE_URL + "select2", params={"md": MANDANT}, timeout=TIMEOUT)
     r.raise_for_status()
     categories = parse_categories(r.text)
     if not categories:
         raise RuntimeError("Category list not found - the site structure may have changed.")
-    return categories
+    return s, categories
 
 
-def check_category(category: Category) -> list[Result]:
-    """Walk the booking flow for one category; one Result per location."""
-    s = new_session()
-    s.get(BASE_URL + "select2", params={"md": MANDANT}, timeout=TIMEOUT).raise_for_status()
+def fetch_categories() -> list[Category]:
+    return open_flow()[1]
+
+
+def check_category(category: Category, session: requests.Session | None = None) -> list[Result]:
+    """Walk the booking flow for one category; one Result per location.
+
+    Pass the session from open_flow() to reuse it; without one, a new flow is started.
+    """
+    s = session or open_flow()[0]
     params = {"mdt": MANDANT, "select_cnc": "1", f"cnc-{category.id}": "1"}
     r = s.get(BASE_URL + "location", params=params, timeout=TIMEOUT)
     r.raise_for_status()
@@ -187,10 +198,8 @@ def check_category(category: Category) -> list[Result]:
 
     results = []
     for i, form in enumerate(locations):
-        if i > 0:  # each location needs a fresh pass through the flow
-            s = new_session()
-            s.get(BASE_URL + "select2", params={"md": MANDANT}, timeout=TIMEOUT)
-            s.get(location_url, timeout=TIMEOUT)
+        if i > 0:  # back to the location step for the next location
+            s.get(location_url, timeout=TIMEOUT).raise_for_status()
         data = {k: v for k, v in form.items() if k in ("loc", "gps_lat", "gps_long")}
         data["select_location"] = "Weiter"
         r = s.post(location_url, data=data, timeout=TIMEOUT, stream=True)
@@ -296,22 +305,39 @@ def print_table(results: list[Result]) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def check_round(categories: list[Category], session: requests.Session | None):
+    """Yield (category, results) for each category, sharing one flow session.
+
+    If the shared session stops working (expired, or the site lost track of it),
+    the category is retried once on a fresh session.
+    """
+    for i, cat in enumerate(categories):
+        if i:
+            time.sleep(REQUEST_DELAY)
+        try:
+            if session is None:
+                session = open_flow()[0]
+            results = check_category(cat, session)
+            if any(r.error for r in results):
+                session = open_flow()[0]
+                results = check_category(cat, session)
+        except (requests.RequestException, RuntimeError) as e:
+            session = None
+            results = [Result(cat, "", error=str(e))]
+        yield cat, results
+
+
 def run_once(category_filter: set[str] | None) -> list[Result]:
-    categories = fetch_categories()
+    session, categories = open_flow()
     if category_filter:
         categories = [c for c in categories if c.id in category_filter]
     results: list[Result] = []
     # Progress goes to stderr so --json output on stdout stays clean.
     tty = sys.stderr.isatty()
-    for i, cat in enumerate(categories):
-        if i:
-            time.sleep(REQUEST_DELAY)
-        line = f"Checking [{i + 1}/{len(categories)}] {cat.name}"
+    for i, (cat, cat_results) in enumerate(check_round(categories, session)):
+        line = f"Checked [{i + 1}/{len(categories)}] {cat.name}"
         print(f"\r\033[K{line[:100]}" if tty else line, end="" if tty else "\n", file=sys.stderr, flush=True)
-        try:
-            results.extend(check_category(cat))
-        except requests.RequestException as e:
-            results.append(Result(cat, "", error=str(e)))
+        results.extend(cat_results)
     if tty:
         print("\r\033[K", end="", file=sys.stderr, flush=True)
     return results

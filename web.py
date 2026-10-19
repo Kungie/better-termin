@@ -231,7 +231,7 @@ class Checker:
             self.wake.clear()
 
     def run_once(self) -> None:
-        categories = bot.fetch_categories()
+        session, categories = bot.open_flow()
         with db() as c:
             for pos, cat in enumerate(categories):
                 c.execute(
@@ -242,15 +242,9 @@ class Checker:
         with self.lock:
             self.progress = {"running": True, "done": 0, "total": len(categories), "current": None}
 
-        for i, cat in enumerate(categories):
-            if i:
-                time.sleep(bot.REQUEST_DELAY)
-            self.progress["current"] = cat.name
-            try:
-                results = bot.check_category(cat)
-            except requests.RequestException as e:
-                results = [bot.Result(cat, "", error=str(e))]
+        for i, (cat, results) in enumerate(bot.check_round(categories, session)):
             record(cat, results)
+            self.progress["current"] = cat.name
             self.progress["done"] = i + 1
 
         self.last_check = now_iso()
@@ -652,7 +646,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Better Termin web UI")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
-    p.add_argument("--interval", type=int, default=300, help="check interval in seconds (min 60)")
+    p.add_argument("--interval", type=int, default=60, help="pause between rounds in seconds (min 60)")
     args = p.parse_args()
 
     load_env()

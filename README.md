@@ -4,7 +4,7 @@
 
 An unofficial tracker for the [Ausländeramt Aachen](https://termine.staedteregion-aachen.de/auslaenderamt/) booking site.
 
-- Shows the earliest free appointment for every appointment type, checked every few minutes.
+- Shows the earliest free appointment for every appointment type, checked about every minute and a half.
 - For types with no free slots, shows how often new slots open, based on the changes it has observed.
 - Sends an e-mail alert when a slot opens or an earlier one appears.
 
