@@ -198,9 +198,10 @@ def now_iso() -> str:
 
 # Each lane loops on its own, so the Straßenverkehrsamt (about 85 categories)
 # doesn't slow down the Ausländeramt checks.
+# Each lane: (units to check, GLOB matching the ids of its categories).
 LANES = {
-    "Ausländeramt": lambda: [bot.AUSLAENDERAMT],
-    "Straßenverkehrsamt": bot.strassenverkehrsamt_sites,
+    "Ausländeramt": (lambda: [bot.AUSLAENDERAMT], "[0-9]*"),
+    "Straßenverkehrsamt": (bot.strassenverkehrsamt_sites, "sva*"),
 }
 
 
@@ -269,8 +270,9 @@ class Checker:
 
     def run_lane(self, name: str) -> str | None:
         """One round over the lane's units; returns an error message for units that failed."""
+        sites_fn, id_glob = self.lanes[name]
         flows, errors = [], []
-        for site in self.lanes[name]():
+        for site in sites_fn():
             try:
                 flows.append(bot.open_flow(site))
             except (requests.RequestException, RuntimeError) as e:
@@ -295,7 +297,24 @@ class Checker:
                 lane["done"] += 1
 
         self.last_check = now_iso()
+        if not errors:  # only after a complete round, so a site hiccup never removes anything
+            prune_categories(id_glob, {cat.id for _, cats in flows for cat in cats})
         return "; ".join(errors) or None
+
+
+def prune_categories(id_glob: str, current: set[str]) -> list[str]:
+    """Remove a lane's categories the sites no longer list (or we no longer track).
+
+    Categories someone has an alert for are always kept.
+    """
+    with db() as c:
+        stale = [r[0] for r in c.execute(
+            "SELECT id FROM categories WHERE id GLOB ? AND id NOT IN (SELECT cat_id FROM alerts)", (id_glob,))
+            if r[0] not in current]
+        for cat_id in stale:
+            for table, col in (("categories", "id"), ("status", "cat_id"), ("events", "cat_id")):
+                c.execute(f"DELETE FROM {table} WHERE {col}=?", (cat_id,))
+    return stale
 
 
 def record(cat: bot.Category, results: list[bot.Result]) -> None:

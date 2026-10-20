@@ -196,13 +196,18 @@ def new_session(base_url: str = BASE_URL) -> requests.Session:
     return s
 
 
+# Units on the root page that aren't tracked: the test unit, and the special
+# permits (Taxi, Güterkraftverkehr, rote Kennzeichen), which always have slots.
+SKIPPED_UNITS = ("test", "ausnahmegenehmigung")
+
+
 def strassenverkehrsamt_sites() -> list[Site]:
-    """The Straßenverkehrsamt units listed on the root page (test units skipped)."""
+    """The Straßenverkehrsamt units listed on the root page, minus SKIPPED_UNITS."""
     r = new_session(ROOT_URL).get(ROOT_URL, timeout=TIMEOUT)
     r.raise_for_status()
     units = re.findall(r"select2\?md=(\d+)&#039;\" name=\"([^\"]+)\"", r.text)
     return [Site(f"sva{md}", html.unescape(name), ROOT_URL, md, order=int(md))
-            for md, name in units if "test" not in name.lower()]
+            for md, name in units if not any(skip in name.lower() for skip in SKIPPED_UNITS)]
 
 
 def all_sites() -> list[Site]:

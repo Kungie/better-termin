@@ -325,6 +325,16 @@ class SiteTests(unittest.TestCase):
         self.assertEqual([(c.id, c.cnc, c.name, c.group) for c in cats],
                          [("sva3-1254", "1254", "Abmeldung", "Monschau"), ("sva3-1255", "1255", "1255", "Monschau")])
 
+    def test_skips_test_and_special_permit_units(self):
+        root = """<button onclick="window.location.href=&#039;select2?md=1&#039;" name="Zulassungsstelle Würselen">
+                  <button onclick="window.location.href=&#039;select2?md=4&#039;" name="Ausnahmegenehmigungen (Taxi/Mietwagen)">
+                  <button onclick="window.location.href=&#039;select2?md=5&#039;" name="A36.3_Verwaltung-Testumgebung">"""
+        resp = mock.Mock(text=root)
+        session = mock.Mock(); session.get.return_value = resp
+        with mock.patch.object(bot, "new_session", return_value=session):
+            sites = bot.strassenverkehrsamt_sites()
+        self.assertEqual([(s.key, s.office) for s in sites], [("sva1", "Zulassungsstelle Würselen")])
+
     def test_parse_grouped_category_list(self):
         page = """<h3 id="header_concerns_accordion-1">RWTH</h3><div><input name="cnc-344"></div>"""
         [cat] = bot.parse_categories(page)
@@ -361,7 +371,7 @@ class MigrationAndLaneTests(unittest.TestCase):
         web.init_db()
         sva = bot.Site("sva2", "Führerscheinstelle", bot.ROOT_URL, "2", order=2)
         cat = bot.Category("sva2-1357", "Umschreibung", "Führerschein", sva, "1357")
-        checker = web.Checker(60, lanes={"test": lambda: [sva]})
+        checker = web.Checker(60, lanes={"test": (lambda: [sva], "sva*")})
         with mock.patch.object(bot, "open_flow", return_value=(object(), [cat])), \
              mock.patch.object(bot, "check_round", return_value=iter([(cat, [bot.Result(cat, "x", earliest=bot.Slot("2026-11-02", "08:00"))])])):
             self.assertIsNone(checker.run_lane("test"))
@@ -382,12 +392,56 @@ class MigrationAndLaneTests(unittest.TestCase):
             if site is bad:
                 raise RuntimeError("down")
             return object(), [cat]
-        checker = web.Checker(60, lanes={"test": lambda: [ok, bad]})
+        checker = web.Checker(60, lanes={"test": (lambda: [ok, bad], "sva*")})
         with mock.patch.object(bot, "open_flow", side_effect=open_flow), \
              mock.patch.object(bot, "check_round", return_value=iter([(cat, [bot.Result(cat, "x")])])):
             err = checker.run_lane("test")
         self.assertIn("Ausnahmen", err)
         self.assertEqual(checker.state["test"]["done"], 1)
+
+
+class PruneTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        p = mock.patch.object(web, "DB_PATH", Path(self.tmp.name) / "t.db")
+        p.start(); self.addCleanup(p.stop)
+        web.init_db()
+        with web.db() as c:
+            for cid in ("344", "sva1-1", "sva4-1312", "sva4-1313"):
+                c.execute("INSERT INTO categories (id, name) VALUES (?, ?)", (cid, cid))
+                c.execute("INSERT INTO status (cat_id, earliest) VALUES (?, '2026-11-01 09:00')", (cid,))
+                c.execute("INSERT INTO events (cat_id, ts, kind) VALUES (?, '2026-10-20T08:00:00', 'opened')", (cid,))
+            c.execute("INSERT INTO alerts (email, cat_id, token) VALUES ('a@b.de', 'sva4-1313', 't')")
+
+    def ids(self, table, col="id"):
+        with web.db() as c:
+            return sorted(r[0] for r in c.execute(f"SELECT {col} FROM {table}"))
+
+    def test_removes_untracked_categories_but_keeps_alerted_ones_and_other_lanes(self):
+        removed = web.prune_categories("sva*", {"sva1-1"})
+        self.assertEqual(removed, ["sva4-1312"])
+        self.assertEqual(self.ids("categories"), ["344", "sva1-1", "sva4-1313"])
+        self.assertEqual(self.ids("status", "cat_id"), ["344", "sva1-1", "sva4-1313"])
+        self.assertEqual(self.ids("events", "cat_id"), ["344", "sva1-1", "sva4-1313"])
+        self.assertEqual(self.ids("alerts", "cat_id"), ["sva4-1313"])
+
+    def test_numeric_glob_only_touches_ausländeramt_ids(self):
+        self.assertEqual(web.prune_categories("[0-9]*", set()), ["344"])
+        self.assertIn("sva4-1312", self.ids("categories"))
+
+    def test_lane_with_a_failed_unit_does_not_prune(self):
+        sva = bot.Site("sva1", "Zulassung", bot.ROOT_URL, "1", order=1)
+        bad = bot.Site("sva2", "Führerschein", bot.ROOT_URL, "2", order=2)
+        def open_flow(site):
+            if site is bad:
+                raise RuntimeError("down")
+            return object(), []
+        checker = web.Checker(60, lanes={"t": (lambda: [sva, bad], "sva*")})
+        with mock.patch.object(bot, "open_flow", side_effect=open_flow), \
+             mock.patch.object(bot, "check_round", return_value=iter([])):
+            checker.run_lane("t")
+        self.assertIn("sva4-1312", self.ids("categories"))
 
 
 class ParseTests(unittest.TestCase):
