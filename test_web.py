@@ -77,7 +77,7 @@ class EventTests(unittest.TestCase):
 
     def test_subscribers_notified_on_open(self):
         with web.db() as c:
-            c.execute("INSERT INTO categories VALUES ('344','RWTH Studenten','RWTH',0)")
+            c.execute("INSERT INTO categories (id, name, grp, position) VALUES ('344','RWTH Studenten','RWTH',0)")
             c.execute("INSERT INTO alerts (email, cat_id, token, confirmed_at) VALUES ('a@b.de','344','t','2026-10-18T07:00:00')")
             c.execute("INSERT INTO alerts (email, cat_id, token) VALUES ('unconfirmed@b.de','344','u')")
         web.record(CAT, res())
@@ -93,7 +93,7 @@ class AlertApiTests(unittest.TestCase):
         p.start(); self.addCleanup(p.stop)
         web.init_db()
         with web.db() as c:
-            c.execute("INSERT INTO categories VALUES ('344','RWTH Studenten','RWTH',0)")
+            c.execute("INSERT INTO categories (id, name, grp, position) VALUES ('344','RWTH Studenten','RWTH',0)")
         self.mails = []
         p = mock.patch.object(web, "send_email", lambda to, subj, body, html=None: self.mails.append((to, subj, body)))
         p.start(); self.addCleanup(p.stop)
@@ -220,6 +220,9 @@ class SmtpTests(unittest.TestCase):
     def test_html_alert_with_embedded_logo(self):
         subject, text, html = web.alert_email("RWTH Studenten", "2026-12-02 10:00", "opened", "tok")
         self.assertIn("Book on the official site", html[0])
+        self.assertIn(bot.AUSLAENDERAMT.booking_url, text)
+        _, text2, _ = web.alert_email("Abmeldung", "2026-12-02 10:00", "opened", "tok", bot.ROOT_URL + "select2?md=1")
+        self.assertIn(bot.ROOT_URL + "select2?md=1", text2)
         self.assertIn("unsubscribe?token=tok", html[0])
         self.assertIn("unsubscribe?token=tok", text)
         env = {"SMTP_HOST": "smtp.example", "SMTP_USER": "me@example", "SMTP_PASSWORD": "pw"}
@@ -305,6 +308,86 @@ class RoundTests(unittest.TestCase):
         self.assertIn("down", out[0][1][0].error)
         self.assertIsNone(out[1][1][0].error)
         open_flow.assert_called_once()
+
+
+class SiteTests(unittest.TestCase):
+    SVA = bot.Site("sva3", "Monschau", bot.ROOT_URL, "3", order=3)
+
+    def test_ausländeramt_keeps_its_ids_other_units_are_prefixed(self):
+        self.assertEqual(bot.AUSLAENDERAMT.category_id("344"), "344")
+        self.assertEqual(self.SVA.category_id("1298"), "sva3-1298")
+        self.assertEqual(self.SVA.booking_url, bot.ROOT_URL + "select2?md=3")
+
+    def test_parse_flat_category_list(self):
+        page = """<form><input type="hidden" id="cncSelected_str-1254" value="Anliegen Abmeldung ausgewählt">
+                  <input name="cnc-1254" type="number"><input name="cnc-1255" type="number"></form>"""
+        cats = bot.parse_categories(page, self.SVA)
+        self.assertEqual([(c.id, c.cnc, c.name, c.group) for c in cats],
+                         [("sva3-1254", "1254", "Abmeldung", "Monschau"), ("sva3-1255", "1255", "1255", "Monschau")])
+
+    def test_parse_grouped_category_list(self):
+        page = """<h3 id="header_concerns_accordion-1">RWTH</h3><div><input name="cnc-344"></div>"""
+        [cat] = bot.parse_categories(page)
+        self.assertEqual((cat.id, cat.group, cat.site), ("344", "RWTH", bot.AUSLAENDERAMT))
+
+
+class MigrationAndLaneTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        p = mock.patch.object(web, "DB_PATH", Path(self.tmp.name) / "t.db")
+        p.start(); self.addCleanup(p.stop)
+
+    def test_old_database_is_migrated_and_alerts_survive(self):
+        import sqlite3
+        conn = sqlite3.connect(web.DB_PATH)   # schema from before offices existed
+        conn.executescript("""
+            CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT, grp TEXT, position INTEGER);
+            CREATE TABLE alerts (id INTEGER PRIMARY KEY, email TEXT NOT NULL, cat_id TEXT NOT NULL,
+                token TEXT NOT NULL UNIQUE, created_at TEXT, last_notified_at TEXT,
+                confirm_token TEXT UNIQUE, confirmed_at TEXT, confirm_sent_at TEXT, UNIQUE (email, cat_id));
+            INSERT INTO categories VALUES ('344', 'RWTH Studenten', 'RWTH', 0);
+            INSERT INTO alerts (email, cat_id, token, confirmed_at) VALUES ('a@b.de', '344', 't', '2026-10-18T08:00:00');
+        """)
+        conn.commit(); conn.close()
+        web.init_db()
+        with web.db() as c:
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(categories)")}
+            alert = c.execute("SELECT * FROM alerts").fetchone()
+        self.assertTrue({"office", "booking_url"} <= cols)
+        self.assertEqual((alert["email"], alert["cat_id"], alert["token"]), ("a@b.de", "344", "t"))
+
+    def test_lane_stores_categories_with_their_office(self):
+        web.init_db()
+        sva = bot.Site("sva2", "Führerscheinstelle", bot.ROOT_URL, "2", order=2)
+        cat = bot.Category("sva2-1357", "Umschreibung", "Führerschein", sva, "1357")
+        checker = web.Checker(60, lanes={"test": lambda: [sva]})
+        with mock.patch.object(bot, "open_flow", return_value=(object(), [cat])), \
+             mock.patch.object(bot, "check_round", return_value=iter([(cat, [bot.Result(cat, "x", earliest=bot.Slot("2026-11-02", "08:00"))])])):
+            self.assertIsNone(checker.run_lane("test"))
+        with web.db() as c:
+            row = c.execute("SELECT * FROM categories").fetchone()
+            status = c.execute("SELECT earliest FROM status").fetchone()[0]
+        self.assertEqual((row["id"], row["office"], row["booking_url"], row["position"]),
+                         ("sva2-1357", "Führerscheinstelle", bot.ROOT_URL + "select2?md=2", 2000))
+        self.assertEqual(status, "2026-11-02 08:00")
+        self.assertEqual(checker.state["test"]["done"], 1)
+
+    def test_a_failing_unit_does_not_stop_the_lane(self):
+        web.init_db()
+        ok = bot.Site("sva1", "Zulassung", bot.ROOT_URL, "1", order=1)
+        bad = bot.Site("sva4", "Ausnahmen", bot.ROOT_URL, "4", order=4)
+        cat = bot.Category("sva1-1", "Abmeldung", "Zulassung", ok, "1")
+        def open_flow(site):
+            if site is bad:
+                raise RuntimeError("down")
+            return object(), [cat]
+        checker = web.Checker(60, lanes={"test": lambda: [ok, bad]})
+        with mock.patch.object(bot, "open_flow", side_effect=open_flow), \
+             mock.patch.object(bot, "check_round", return_value=iter([(cat, [bot.Result(cat, "x")])])):
+            err = checker.run_lane("test")
+        self.assertIn("Ausnahmen", err)
+        self.assertEqual(checker.state["test"]["done"], 1)
 
 
 class ParseTests(unittest.TestCase):

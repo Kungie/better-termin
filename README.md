@@ -2,9 +2,9 @@
 
 **https://better-termin.tail015e29.ts.net**
 
-An unofficial tracker for the [Ausländeramt Aachen](https://termine.staedteregion-aachen.de/auslaenderamt/) booking site.
+An unofficial tracker for the Städteregion Aachen booking sites: the [Ausländeramt](https://termine.staedteregion-aachen.de/auslaenderamt/) and the [Straßenverkehrsamt](https://termine.staedteregion-aachen.de/) (vehicle registration, driving licences, special permits).
 
-- Shows the earliest free appointment for every appointment type, checked about every minute and a half.
+- Shows the earliest free appointment for every appointment type, checked every few minutes (the Ausländeramt about every minute and a half).
 - For types with no free slots, shows how often new slots open, based on the changes it has observed.
 - Sends an e-mail alert when a slot opens or an earlier one appears.
 

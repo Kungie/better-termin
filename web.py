@@ -126,7 +126,8 @@ def operator() -> dict:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS categories (
-    id TEXT PRIMARY KEY, name TEXT, grp TEXT, position INTEGER
+    id TEXT PRIMARY KEY, name TEXT, grp TEXT, position INTEGER,
+    office TEXT, booking_url TEXT
 );
 CREATE TABLE IF NOT EXISTS status (
     cat_id TEXT PRIMARY KEY,
@@ -178,6 +179,11 @@ def init_db() -> None:
         for col in ("confirm_token", "confirmed_at", "confirm_sent_at"):
             if col not in cols:
                 c.execute(f"ALTER TABLE alerts ADD COLUMN {col} TEXT")
+        # older databases: categories from several offices
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(categories)")}
+        for col in ("office", "booking_url"):
+            if col not in cols:
+                c.execute(f"ALTER TABLE categories ADD COLUMN {col} TEXT")
         c.execute("INSERT OR IGNORE INTO meta VALUES ('tracking_since', ?)", (now_iso(),))
 
 
@@ -190,64 +196,106 @@ def now_iso() -> str:
 # --------------------------------------------------------------------------- #
 
 
-class Checker:
-    """Runs a full check of all categories every `interval` seconds."""
+# Each lane loops on its own, so the Straßenverkehrsamt (about 85 categories)
+# doesn't slow down the Ausländeramt checks.
+LANES = {
+    "Ausländeramt": lambda: [bot.AUSLAENDERAMT],
+    "Straßenverkehrsamt": bot.strassenverkehrsamt_sites,
+}
 
-    def __init__(self, interval: int):
+
+class Checker:
+    """Checks every category, pausing `interval` seconds between rounds of each lane."""
+
+    def __init__(self, interval: int, lanes: dict | None = None):
         self.interval = interval
-        self.wake = threading.Event()
+        self.lanes = lanes or LANES
         self.lock = threading.Lock()
-        self.progress = {"running": False, "done": 0, "total": 0, "current": None}
+        self.wakes = {name: threading.Event() for name in self.lanes}
+        self.state = {name: {"running": False, "done": 0, "total": 0, "current": None,
+                             "next": None, "error": None} for name in self.lanes}
         self.last_check: str | None = None
-        self.next_check: str | None = None
-        self.last_error: str | None = None
 
     def start(self) -> None:
-        threading.Thread(target=self._loop, daemon=True).start()
+        for name in self.lanes:
+            threading.Thread(target=self._loop, args=(name,), daemon=True).start()
+
+    @property
+    def progress(self) -> dict:
+        with self.lock:
+            running = [lane for lane in self.state.values() if lane["running"]]
+            return {
+                "running": bool(running),
+                "done": sum(lane["done"] for lane in running),
+                "total": sum(lane["total"] for lane in running),
+                "current": running[-1]["current"] if running else None,
+            }
+
+    @property
+    def next_check(self) -> str | None:
+        upcoming = [lane["next"] for lane in self.state.values() if lane["next"] and not lane["running"]]
+        return min(upcoming) if upcoming else None
+
+    @property
+    def last_error(self) -> str | None:
+        return "; ".join(f"{name}: {lane['error']}" for name, lane in self.state.items() if lane["error"]) or None
 
     def request_refresh(self) -> bool:
         with self.lock:
-            if self.progress["running"]:
+            idle = [name for name, lane in self.state.items() if not lane["running"]]
+            if not idle:
                 return False
             if self.last_check and (datetime.now() - datetime.fromisoformat(self.last_check)).total_seconds() < MIN_REFRESH_GAP:
                 return False
-        self.wake.set()
+        for name in idle:
+            self.wakes[name].set()
         return True
 
-    def _loop(self) -> None:
+    def _loop(self, name: str) -> None:
+        lane = self.state[name]
         while True:
             try:
                 delete_unconfirmed()
-                self.run_once()
-                self.last_error = None
+                lane["error"] = self.run_lane(name)
             except (requests.RequestException, RuntimeError) as e:
-                self.last_error = str(e)
-                print(f"Check failed: {e}", file=sys.stderr)
+                lane["error"] = str(e)
+                print(f"Check failed ({name}): {e}", file=sys.stderr)
             finally:
                 with self.lock:
-                    self.progress["running"] = False
-            self.next_check = (datetime.now() + timedelta(seconds=self.interval)).isoformat(timespec="seconds")
-            self.wake.wait(self.interval)
-            self.wake.clear()
+                    lane["running"] = False
+            lane["next"] = (datetime.now() + timedelta(seconds=self.interval)).isoformat(timespec="seconds")
+            self.wakes[name].wait(self.interval)
+            self.wakes[name].clear()
 
-    def run_once(self) -> None:
-        session, categories = bot.open_flow()
+    def run_lane(self, name: str) -> str | None:
+        """One round over the lane's units; returns an error message for units that failed."""
+        flows, errors = [], []
+        for site in self.lanes[name]():
+            try:
+                flows.append(bot.open_flow(site))
+            except (requests.RequestException, RuntimeError) as e:
+                errors.append(f"{site.office}: {e}")
         with db() as c:
-            for pos, cat in enumerate(categories):
-                c.execute(
-                    "INSERT INTO categories VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE "
-                    "SET name=excluded.name, grp=excluded.grp, position=excluded.position",
-                    (cat.id, cat.name, cat.group, pos),
-                )
+            for _, categories in flows:
+                for pos, cat in enumerate(categories):
+                    c.execute(
+                        "INSERT INTO categories (id, name, grp, position, office, booking_url) VALUES (?,?,?,?,?,?) "
+                        "ON CONFLICT(id) DO UPDATE SET name=excluded.name, grp=excluded.grp, "
+                        "position=excluded.position, office=excluded.office, booking_url=excluded.booking_url",
+                        (cat.id, cat.name, cat.group, cat.site.order * 1000 + pos, cat.site.office, cat.site.booking_url),
+                    )
+        lane = self.state[name]
         with self.lock:
-            self.progress = {"running": True, "done": 0, "total": len(categories), "current": None}
+            lane.update(running=True, done=0, total=sum(len(cats) for _, cats in flows), current=None)
 
-        for i, (cat, results) in enumerate(bot.check_round(categories, session)):
-            record(cat, results)
-            self.progress["current"] = cat.name
-            self.progress["done"] = i + 1
+        for session, categories in flows:
+            for cat, results in bot.check_round(categories, session):
+                record(cat, results)
+                lane["current"] = cat.name
+                lane["done"] += 1
 
         self.last_check = now_iso()
+        return "; ".join(errors) or None
 
 
 def record(cat: bot.Category, results: list[bot.Result]) -> None:
@@ -395,12 +443,12 @@ def signup_rate_limited(ip: str) -> bool:
         return False
 
 
-def alert_email(cat_name: str, earliest: str, kind: str, token: str) -> tuple[str, str, tuple[str, str]]:
+def alert_email(cat_name: str, earliest: str, kind: str, token: str,
+                booking_url: str = bot.AUSLAENDERAMT.booking_url) -> tuple[str, str, tuple[str, str]]:
     """Subject, plain-text body and HTML of the e-mail sent when a slot opens or moves earlier."""
     date, hhmm = earliest.split()
     what = "a slot opened" if kind == "opened" else "an earlier slot opened"
     subject = f"{cat_name}: {what} — {bot.fmt_date(date)} {hhmm}"
-    booking_url = bot.BASE_URL + "select2?md=" + bot.MANDANT
     unsubscribe_url = f"{request_base()}unsubscribe?token={token}"
     body = (
         f"{cat_name}: {what}.\n\nEarliest appointment: {bot.fmt_date(date)} {hhmm}\n\n"
@@ -423,7 +471,7 @@ def notify_subscribers(cat: bot.Category, earliest: str, kind: str) -> None:
     with db() as c:
         subs = c.execute("SELECT * FROM alerts WHERE cat_id=? AND confirmed_at IS NOT NULL", (cat.id,)).fetchall()
         for sub in subs:
-            send_email(sub["email"], *alert_email(cat.name, earliest, kind, sub["token"]))
+            send_email(sub["email"], *alert_email(cat.name, earliest, kind, sub["token"], cat.site.booking_url))
             c.execute("UPDATE alerts SET last_notified_at=? WHERE id=?", (now_iso(), sub["id"]))
 
 
@@ -515,6 +563,8 @@ def api_status():
             earliest = {"date": d, "time": t}
         cats.append({
             "id": r["id"], "name": r["name"], "group": r["grp"],
+            "office": r["office"] or bot.AUSLAENDERAMT.office,
+            "booking_url": r["booking_url"] or bot.AUSLAENDERAMT.booking_url,
             "earliest": earliest, "location": r["location"],
             "checked_at": r["checked_at"], "error": r["error"],
             "available_since": r["available_since"],

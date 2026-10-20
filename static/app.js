@@ -77,11 +77,11 @@ function rowHtml(c) {
   const a = myAlerts.get(c.id);
   const label = !a ? `${ICONS.bell}E-mail alert` : a.status === "active" ? `${ICONS.check}Alert set` : `${ICONS.mail}Confirm in inbox`;
   return `<li class="row">
-    <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0].replace(/^Ausländeramt Aachen(\s*-\s*)?/, ""))}</div></div>
+    <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0].replace(/^(Ausländeramt Aachen|StädteRegion Aachen)(\s*-\s*|\s+)?/, ""))}</div></div>
     <div>${status}</div>
     <div class="alert">
       <button class="btn small ${a ? (a.status === "active" ? "on" : "pending") : ""}" data-alert="${esc(c.id)}">${label}</button>
-      <a class="btn small outline" href="${esc(data.booking_url)}" target="_blank" rel="noopener" title="Opens the booking site; pick “${esc(c.name)}” there">Go to site ↗</a>
+      <a class="btn small outline" href="${esc(c.booking_url)}" target="_blank" rel="noopener" title="Opens the booking site; pick “${esc(c.name)}” there">Go to site ↗</a>
     </div>
   </li>`;
 }
@@ -107,18 +107,28 @@ function render() {
 
   if (!cats.length) { $("#list").innerHTML = `<div class="empty">Running the first check…</div>`; return; }
 
-  const groups = [];
+  // office (Ausländeramt, Zulassungsstelle …) → group → categories, in server order
+  const offices = [];
   for (const c of cats) {
-    let g = groups.find(g => g.name === c.group);
-    if (!g) groups.push(g = { name: c.group, items: [] });
+    let o = offices.find(o => o.name === c.office);
+    if (!o) offices.push(o = { name: c.office, groups: [] });
+    let g = o.groups.find(g => g.name === c.group);
+    if (!g) o.groups.push(g = { name: c.group, key: `${c.office} / ${c.group}`, items: [] });
     g.items.push(c);
   }
-  $("#list").innerHTML = groups.length ? groups.map(g => `
-    <details class="group" data-group="${esc(g.name)}" ${openGroups.has(g.name) ? "open" : ""}>
-      <summary class="group-head"><span class="gname">${esc(g.name)}</span>
-        <span class="cnt">${groupSummary(g.items)}</span></summary>
-      <ul class="rows">${g.items.map(rowHtml).join("")}</ul>
-    </details>`).join("") : "";
+  // Ausländeramt groups were remembered by their bare name before offices were added
+  const isOpen = (o, g) => openGroups.has(g.key) || (o.name === "Ausländeramt" && openGroups.has(g.name));
+  $("#list").innerHTML = offices.map(o => `
+    <section class="office">
+      <h2 class="office-head"><span>${esc(o.name)}</span>
+        <span class="cnt">${groupSummary(o.groups.flatMap(g => g.items))}</span></h2>
+      ${o.groups.map(g => `
+      <details class="group" data-group="${esc(g.key)}" ${isOpen(o, g) ? "open" : ""}>
+        <summary class="group-head"><span class="gname">${esc(g.name === o.name ? "All services" : g.name)}</span>
+          <span class="cnt">${groupSummary(g.items)}</span></summary>
+        <ul class="rows">${g.items.map(rowHtml).join("")}</ul>
+      </details>`).join("")}
+    </section>`).join("");
 }
 
 async function refreshStatus() {

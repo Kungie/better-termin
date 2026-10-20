@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Aachen Ausländeramt appointment tracker.
+"""Städteregion Aachen appointment tracker.
 
-Tracks the earliest free appointment for every category (Anliegen) on
-https://termine.staedteregion-aachen.de/auslaenderamt/ and sends a
-notification when an earlier slot opens up.
+Tracks the earliest free appointment for every category (Anliegen) of the
+Ausländeramt (https://termine.staedteregion-aachen.de/auslaenderamt/) and the
+Straßenverkehrsamt units (https://termine.staedteregion-aachen.de/), and sends
+a notification when an earlier slot opens up.
 
 The bot only reads; it never books an appointment.
 """
@@ -25,7 +26,8 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-BASE_URL = "https://termine.staedteregion-aachen.de/auslaenderamt/"
+ROOT_URL = "https://termine.staedteregion-aachen.de/"   # Straßenverkehrsamt units
+BASE_URL = ROOT_URL + "auslaenderamt/"
 MANDANT = "1"  # "Ausländer- und Staatsangehörigkeitsbehörde"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -36,11 +38,37 @@ REQUEST_DELAY = 1.0  # seconds between categories, to be polite to the server
 TIMEOUT = 60
 
 
+@dataclass(frozen=True)
+class Site:
+    """One TEVIS booking unit ("Funktionseinheit"), e.g. the Ausländeramt."""
+    key: str      # prefix for category ids; "" keeps the original Ausländeramt ids
+    office: str   # shown in the UI
+    base_url: str
+    md: str       # unit number in the TEVIS URLs (md / mdt)
+    order: int = 0
+
+    def category_id(self, cnc: str) -> str:
+        return f"{self.key}-{cnc}" if self.key else cnc
+
+    @property
+    def booking_url(self) -> str:
+        return f"{self.base_url}select2?md={self.md}"
+
+
+AUSLAENDERAMT = Site("", "Ausländeramt", BASE_URL, MANDANT)
+
+
 @dataclass
 class Category:
     id: str
     name: str
     group: str
+    site: Site = AUSLAENDERAMT
+    cnc: str = ""   # the unit's own id for this category; defaults to id
+
+    def __post_init__(self):
+        if not self.cnc:
+            self.cnc = self.id
 
 
 @dataclass
@@ -63,23 +91,32 @@ class Result:
 # --------------------------------------------------------------------------- #
 
 
-def parse_categories(page: str) -> list[Category]:
-    """Extract all categories from the step-2 page (select2?md=1)."""
+def parse_categories(page: str, site: Site = AUSLAENDERAMT) -> list[Category]:
+    """Extract all categories from the step-2 page (select2?md=...).
+
+    Most units group their categories under accordion headers; some list them
+    flat, in which case the unit's name is used as the group.
+    """
     soup = BeautifulSoup(page, "html.parser")
+
+    def category(inp, group: str) -> Category:
+        cnc = inp["name"].removeprefix("cnc-")
+        hidden = soup.find("input", id=f"cncSelected_str-{cnc}")
+        name = cnc
+        if hidden is not None:
+            m = re.match(r"Anliegen (.*) ausgewählt", hidden["value"])
+            name = m.group(1).strip() if m else hidden["value"]
+        return Category(site.category_id(cnc), html.unescape(name), group, site, cnc)
+
     categories = []
-    for header in soup.select('h3[id^="header_concerns_accordion-"]'):
-        group = header.get_text(strip=True)
+    headers = soup.select('h3[id^="header_concerns_accordion-"]')
+    for header in headers:
         panel = header.find_next_sibling()
-        if panel is None:
-            continue
-        for inp in panel.select('input[name^="cnc-"]'):
-            cnc_id = inp["name"].removeprefix("cnc-")
-            hidden = soup.find("input", id=f"cncSelected_str-{cnc_id}")
-            name = cnc_id
-            if hidden is not None:
-                m = re.match(r"Anliegen (.*) ausgewählt", hidden["value"])
-                name = m.group(1).strip() if m else hidden["value"]
-            categories.append(Category(cnc_id, html.unescape(name), group))
+        if panel is not None:
+            group = header.get_text(strip=True)
+            categories += [category(inp, group) for inp in panel.select('input[name^="cnc-"]')]
+    if not headers:
+        categories = [category(inp, site.office) for inp in soup.select('input[name^="cnc-"]')]
     return categories
 
 
@@ -152,30 +189,43 @@ def page_title(page: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def new_session() -> requests.Session:
+def new_session(base_url: str = BASE_URL) -> requests.Session:
     s = requests.Session()
     s.headers.update({"User-Agent": USER_AGENT, "Accept-Language": "de-DE,de;q=0.9"})
-    s.get(BASE_URL, timeout=TIMEOUT).raise_for_status()
+    s.get(base_url, timeout=TIMEOUT).raise_for_status()
     return s
 
 
-def open_flow() -> tuple[requests.Session, list[Category]]:
-    """Start a booking-flow session and read the category list.
-
-    The category page (select2) is ~600 KB, so a whole round of checks shares one
-    session and fetches it once instead of once per category.
-    """
-    s = new_session()
-    r = s.get(BASE_URL + "select2", params={"md": MANDANT}, timeout=TIMEOUT)
+def strassenverkehrsamt_sites() -> list[Site]:
+    """The Straßenverkehrsamt units listed on the root page (test units skipped)."""
+    r = new_session(ROOT_URL).get(ROOT_URL, timeout=TIMEOUT)
     r.raise_for_status()
-    categories = parse_categories(r.text)
+    units = re.findall(r"select2\?md=(\d+)&#039;\" name=\"([^\"]+)\"", r.text)
+    return [Site(f"sva{md}", html.unescape(name), ROOT_URL, md, order=int(md))
+            for md, name in units if "test" not in name.lower()]
+
+
+def all_sites() -> list[Site]:
+    return [AUSLAENDERAMT, *strassenverkehrsamt_sites()]
+
+
+def open_flow(site: Site = AUSLAENDERAMT) -> tuple[requests.Session, list[Category]]:
+    """Start a booking-flow session for a unit and read its category list.
+
+    The category page (select2) is up to ~600 KB, so all checks of a unit in a
+    round share one session and fetch it once instead of once per category.
+    """
+    s = new_session(site.base_url)
+    r = s.get(site.base_url + "select2", params={"md": site.md}, timeout=TIMEOUT)
+    r.raise_for_status()
+    categories = parse_categories(r.text, site)
     if not categories:
-        raise RuntimeError("Category list not found - the site structure may have changed.")
+        raise RuntimeError(f"Category list not found for {site.office} - the site structure may have changed.")
     return s, categories
 
 
 def fetch_categories() -> list[Category]:
-    return open_flow()[1]
+    return [c for site in all_sites() for c in open_flow(site)[1]]
 
 
 def check_category(category: Category, session: requests.Session | None = None) -> list[Result]:
@@ -183,9 +233,10 @@ def check_category(category: Category, session: requests.Session | None = None) 
 
     Pass the session from open_flow() to reuse it; without one, a new flow is started.
     """
-    s = session or open_flow()[0]
-    params = {"mdt": MANDANT, "select_cnc": "1", f"cnc-{category.id}": "1"}
-    r = s.get(BASE_URL + "location", params=params, timeout=TIMEOUT)
+    site = category.site
+    s = session or open_flow(site)[0]
+    params = {"mdt": site.md, "select_cnc": "1", f"cnc-{category.cnc}": "1"}
+    r = s.get(site.base_url + "location", params=params, timeout=TIMEOUT)
     r.raise_for_status()
     location_url = r.url
 
@@ -316,10 +367,10 @@ def check_round(categories: list[Category], session: requests.Session | None):
             time.sleep(REQUEST_DELAY)
         try:
             if session is None:
-                session = open_flow()[0]
+                session = open_flow(cat.site)[0]
             results = check_category(cat, session)
             if any(r.error for r in results):
-                session = open_flow()[0]
+                session = open_flow(cat.site)[0]
                 results = check_category(cat, session)
         except (requests.RequestException, RuntimeError) as e:
             session = None
@@ -328,16 +379,17 @@ def check_round(categories: list[Category], session: requests.Session | None):
 
 
 def run_once(category_filter: set[str] | None) -> list[Result]:
-    session, categories = open_flow()
-    if category_filter:
-        categories = [c for c in categories if c.id in category_filter]
     results: list[Result] = []
     # Progress goes to stderr so --json output on stdout stays clean.
     tty = sys.stderr.isatty()
-    for i, (cat, cat_results) in enumerate(check_round(categories, session)):
-        line = f"Checked [{i + 1}/{len(categories)}] {cat.name}"
-        print(f"\r\033[K{line[:100]}" if tty else line, end="" if tty else "\n", file=sys.stderr, flush=True)
-        results.extend(cat_results)
+    for site in all_sites():
+        session, categories = open_flow(site)
+        if category_filter:
+            categories = [c for c in categories if c.id in category_filter]
+        for i, (cat, cat_results) in enumerate(check_round(categories, session)):
+            line = f"Checked {site.office} [{i + 1}/{len(categories)}] {cat.name}"
+            print(f"\r\033[K{line[:100]}" if tty else line, end="" if tty else "\n", file=sys.stderr, flush=True)
+            results.extend(cat_results)
     if tty:
         print("\r\033[K", end="", file=sys.stderr, flush=True)
     return results
@@ -359,7 +411,7 @@ def main() -> None:
 
     if args.list:
         for c in fetch_categories():
-            print(f"{c.id:>5}  {c.group:<28} {c.name}")
+            print(f"{c.id:>10}  {c.site.office[:28]:<28} {c.group[:28]:<28} {c.name}")
         return
 
     category_filter = {c.strip() for c in args.categories.split(",")} if args.categories else None

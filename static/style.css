@@ -70,6 +70,11 @@ details[open] > summary::before { content: "▾"; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
 .toolbar .hint { font-size: 14px; color: var(--muted); }
 
+.office { margin: 0 0 22px; }
+.office-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  font-size: 18px; font-weight: 700; color: var(--navy); margin: 0 0 8px; padding-bottom: 6px;
+  border-bottom: 2px solid var(--lime); }
+.office-head .cnt { font-size: 14px; font-weight: 400; color: var(--muted); white-space: nowrap; }
 .group { margin-bottom: 4px; }
 .group-head { display: flex; align-items: baseline; gap: 4px; }
 .group-head .gname { flex: 1; }
