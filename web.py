@@ -39,6 +39,7 @@ import termin_bot as bot
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "termin.db"
 MIN_REFRESH_GAP = 60  # seconds; "Check now" can't hammer the site
+MAX_BACKOFF = 15 * 60  # longest pause while the booking site keeps failing
 CONFIRM_TTL = timedelta(hours=48)  # unconfirmed sign-ups are deleted after this
 RESEND_GAP = timedelta(minutes=10)  # min gap between confirmation mails to one address
 SIGNUPS_PER_IP_PER_HOUR = 10
@@ -214,7 +215,7 @@ class Checker:
         self.lock = threading.Lock()
         self.wakes = {name: threading.Event() for name in self.lanes}
         self.state = {name: {"running": False, "done": 0, "total": 0, "current": None,
-                             "next": None, "error": None} for name in self.lanes}
+                             "next": None, "error": None, "failures": 0} for name in self.lanes}
         self.last_check: str | None = None
 
     def start(self) -> None:
@@ -239,7 +240,12 @@ class Checker:
 
     @property
     def last_error(self) -> str | None:
-        return "; ".join(f"{name}: {lane['error']}" for name, lane in self.state.items() if lane["error"]) or None
+        errors = []
+        for name, lane in self.state.items():
+            if lane["error"]:
+                err = lane["error"]
+                errors.append(err if err.startswith(f"{name}:") else f"{name}: {err}")
+        return "; ".join(errors) or None
 
     def request_refresh(self) -> bool:
         with self.lock:
@@ -260,12 +266,15 @@ class Checker:
                 lane["error"] = self.run_lane(name)
             except (requests.RequestException, RuntimeError) as e:
                 lane["error"] = str(e)
-                print(f"Check failed ({name}): {e}", file=sys.stderr)
             finally:
                 with self.lock:
                     lane["running"] = False
-            lane["next"] = (datetime.now() + timedelta(seconds=self.interval)).isoformat(timespec="seconds")
-            self.wakes[name].wait(self.interval)
+            if lane["error"]:
+                print(f"Check failed ({name}): {lane['error']}", file=sys.stderr)
+            lane["failures"] = lane["failures"] + 1 if lane["error"] else 0
+            pause = backoff(self.interval, lane["failures"])
+            lane["next"] = (datetime.now() + timedelta(seconds=pause)).isoformat(timespec="seconds")
+            self.wakes[name].wait(pause)
             self.wakes[name].clear()
 
     def run_lane(self, name: str) -> str | None:
@@ -296,10 +305,17 @@ class Checker:
                 lane["current"] = cat.name
                 lane["done"] += 1
 
-        self.last_check = now_iso()
+        if flows:  # "last check" means the booking site actually answered
+            self.last_check = now_iso()
         if not errors:  # only after a complete round, so a site hiccup never removes anything
             prune_categories(id_glob, {cat.id for _, cats in flows for cat in cats})
         return "; ".join(errors) or None
+
+
+def backoff(interval: int, failures: int) -> int:
+    """Pause before the next round: doubles with each failed round in a row, so a
+    struggling booking site isn't hit every minute, and resets after a good round."""
+    return min(interval * 2 ** failures, max(interval, MAX_BACKOFF))
 
 
 def prune_categories(id_glob: str, current: set[str]) -> list[str]:
@@ -569,6 +585,7 @@ def api_status():
             "FROM categories c LEFT JOIN status s ON s.cat_id = c.id ORDER BY c.position"
         ).fetchall()
         events = c.execute("SELECT * FROM events ORDER BY ts").fetchall()
+        last_ok = c.execute("SELECT MAX(ok_at) FROM status").fetchone()[0]
 
     by_cat: dict[str, list] = {}
     for e in events:
@@ -597,6 +614,7 @@ def api_status():
         "interval": checker.interval,
         "progress": checker.progress,
         "error": checker.last_error,
+        "last_ok": last_ok,
         "booking_url": bot.BASE_URL + "select2?md=" + bot.MANDANT,
         "alerts_enabled": alerts_enabled(),
         "categories": cats,

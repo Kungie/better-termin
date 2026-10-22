@@ -86,6 +86,21 @@ function rowHtml(c) {
   </li>`;
 }
 
+// Turn "Ausländeramt: …Read timed out…; Straßenverkehrsamt: 504 …" into a plain sentence.
+function showProblem(error, lastOk) {
+  const b = $("#banner");
+  b.hidden = !error;
+  if (!error) return;
+  const offices = [...new Set(error.split("; ").map(e => e.split(":")[0].trim()))];
+  const who = offices.length > 1 ? offices.slice(0, -1).join(", ") + " and " + offices.at(-1) : offices[0];
+  const down = /timed out|50[234]|gateway|connection|max retries/i.test(error);
+  b.textContent = (down
+      ? `The official ${who} booking ${offices.length > 1 ? "sites aren't" : "site isn't"} responding right now, so dates can't be updated. Better Termin keeps trying, less often while ${offices.length > 1 ? "they're" : "it's"} down.`
+      : `Some ${who} categories couldn't be checked right now.`)
+    + (lastOk ? ` The dates below are from the last successful check (${fmtDT(lastOk)}).` : "");
+  b.title = error;  // the raw error, for anyone who wants the details
+}
+
 function groupSummary(items) {
   return `${items.filter(c => c.earliest).length}/${items.length} available`;
 }
@@ -102,7 +117,8 @@ function render() {
   const p = data.progress, bar = $("#progress");
   bar.classList.toggle("on", p.running);
   bar.firstElementChild.style.width = p.total ? `${(p.done / p.total) * 100}%` : "0";
-  $("#hint").textContent = p.running ? `Checking ${p.done}/${p.total}: ${p.current || ""}` : (data.error ? `Last check failed: ${data.error}` : "");
+  $("#hint").textContent = p.running ? `Checking ${p.done}/${p.total}: ${p.current || ""}` : "";
+  showProblem(data.error, data.last_ok);
   $("#refresh").disabled = p.running;
 
   if (!cats.length) { $("#list").innerHTML = `<div class="empty">Running the first check…</div>`; return; }

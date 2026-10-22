@@ -69,6 +69,7 @@ details[open] > summary::before { content: "▾"; }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
 .toolbar .hint { font-size: 14px; color: var(--muted); }
+.note.banner { margin: 0 0 16px; font-size: 15px; }
 
 .office { margin: 0 0 22px; }
 .office-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;

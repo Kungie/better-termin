@@ -399,6 +399,14 @@ class MigrationAndLaneTests(unittest.TestCase):
         self.assertIn("Ausnahmen", err)
         self.assertEqual(checker.state["test"]["done"], 1)
 
+    def test_last_check_not_updated_when_no_site_answers(self):
+        web.init_db()
+        site = bot.Site("sva1", "Zulassung", bot.ROOT_URL, "1", order=1)
+        checker = web.Checker(60, lanes={"test": (lambda: [site], "sva*")})
+        with mock.patch.object(bot, "open_flow", side_effect=RuntimeError("504")):
+            checker.run_lane("test")
+        self.assertIsNone(checker.last_check)
+
 
 class PruneTests(unittest.TestCase):
     def setUp(self):
@@ -442,6 +450,27 @@ class PruneTests(unittest.TestCase):
              mock.patch.object(bot, "check_round", return_value=iter([])):
             checker.run_lane("t")
         self.assertIn("sva4-1312", self.ids("categories"))
+
+
+class BackoffTests(unittest.TestCase):
+    def test_pause_doubles_while_failing_and_is_capped(self):
+        self.assertEqual([web.backoff(60, n) for n in range(6)], [60, 120, 240, 480, 900, 900])
+
+    def test_last_error_does_not_repeat_the_lane_name(self):
+        checker = web.Checker(60, lanes={"Ausländeramt": (lambda: [], "[0-9]*"), "Straßenverkehrsamt": (lambda: [], "sva*")})
+        checker.state["Ausländeramt"]["error"] = "Ausländeramt: Read timed out"
+        checker.state["Straßenverkehrsamt"]["error"] = "504 Server Error"
+        self.assertEqual(checker.last_error, "Ausländeramt: Read timed out; Straßenverkehrsamt: 504 Server Error")
+
+    def test_status_reports_the_last_successful_check(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        with mock.patch.object(web, "DB_PATH", Path(tmp.name) / "t.db"):
+            web.init_db()
+            web.record(CAT, res("2026-11-01"))
+            web.app.config["CHECKER"] = web.Checker(60, lanes={"x": (lambda: [], "*")})
+            data = web.app.test_client().get("/api/status").get_json()
+        self.assertIsNotNone(data["last_ok"])
+        self.assertIsNone(data["error"])
 
 
 class ParseTests(unittest.TestCase):
