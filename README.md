@@ -8,7 +8,7 @@ An unofficial tracker for the Städteregion Aachen booking sites: the [Auslände
 - For types with no free slots, shows how often new slots open, based on the changes it has observed.
 - Sends an e-mail alert when a slot opens or an earlier one appears.
 
-It only reads the official site and never books anything; appointments are still booked there. It is not affiliated with the Städteregion Aachen.
+It only reads the official sites and never books anything; appointments are still booked there. It is not affiliated with the Städteregion Aachen.
 
 ## License
 
