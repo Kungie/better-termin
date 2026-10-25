@@ -493,6 +493,18 @@ class RedirectTests(unittest.TestCase):
             self.assertEqual(self.get("/privacy", "bettertermin.com", "https://bettertermin.com").status_code, 200)
             self.assertEqual(self.get("/privacy", "x.tail015e29.ts.net", "https://x.tail015e29.ts.net").status_code, 200)
 
+    def test_www_goes_to_the_bare_domain(self):
+        r = self.get("/privacy", "www.bettertermin.com", "https://bettertermin.com")
+        self.assertEqual(r.headers["Location"], "https://bettertermin.com/privacy")
+
+    def test_client_ip_trusts_cloudflare_only_on_the_public_domain(self):
+        with mock.patch.dict(os.environ, {"PUBLIC_URL": "https://bettertermin.com"}):
+            with web.app.test_request_context("/", headers={"Host": "bettertermin.com", "CF-Connecting-IP": "1.2.3.4"}):
+                self.assertEqual(web.client_ip(), "1.2.3.4")
+            with web.app.test_request_context("/", headers={"Host": "x.tail015e29.ts.net", "CF-Connecting-IP": "1.2.3.4"},
+                                              environ_base={"REMOTE_ADDR": "5.6.7.8"}):
+                self.assertEqual(web.client_ip(), "5.6.7.8")
+
     def test_form_posts_on_the_old_address_are_not_redirected(self):
         with mock.patch.dict(os.environ, {"PUBLIC_URL": "https://bettertermin.com"}):
             r = self.client.post("/unsubscribe", data={"token": "x"}, headers={"Host": "better-termin.tail015e29.ts.net"})

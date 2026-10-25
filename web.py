@@ -91,10 +91,23 @@ def redirect_old_address():
     *.ts.net address; they keep working and land on the same page there.
     """
     public = os.environ.get("PUBLIC_URL", "").rstrip("/")
-    if (request.method in ("GET", "HEAD") and request.host.endswith(".ts.net")
-            and public and not public.split("://")[-1].endswith(".ts.net")):
-        target = public + request.full_path.rstrip("?")
-        return redirect(target, 301)
+    public_host = public.split("://")[-1]
+    if not public or public_host.endswith(".ts.net") or request.method not in ("GET", "HEAD"):
+        return None
+    if request.host.endswith(".ts.net") or request.host == f"www.{public_host}":
+        return redirect(public + request.full_path.rstrip("?"), 301)
+    return None
+
+
+def client_ip() -> str:
+    """The visitor's IP. Behind the Cloudflare Tunnel every request comes from
+    Cloudflare, which passes the real address in CF-Connecting-IP; that header is
+    only trusted on the public domain, the only way in through Cloudflare."""
+    public_host = os.environ.get("PUBLIC_URL", "").rstrip("/").split("://")[-1]
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip and public_host and request.host == public_host:
+        return cf_ip
+    return request.remote_addr or ""
 
 
 @app.before_request
@@ -673,7 +686,7 @@ def api_alerts_create():
         return jsonify({"error": "Please enter a valid e-mail address."}), 400
     if data.get("consent") is not True:
         return jsonify({"error": "Please accept the privacy policy to set an alert."}), 400
-    if signup_rate_limited(request.remote_addr or ""):
+    if signup_rate_limited(client_ip()):
         return jsonify({"error": "Too many sign-ups from this connection. Please try again later."}), 429
 
     with db() as c:

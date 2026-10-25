@@ -1,6 +1,6 @@
 # Better Termin
 
-**https://better-termin.tail015e29.ts.net**
+**https://bettertermin.com**
 
 An unofficial tracker for the Städteregion Aachen booking sites: the [Ausländeramt](https://termine.staedteregion-aachen.de/auslaenderamt/) and the [Straßenverkehrsamt](https://termine.staedteregion-aachen.de/) (vehicle registration and driving licences).
 
