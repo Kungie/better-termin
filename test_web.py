@@ -473,6 +473,32 @@ class BackoffTests(unittest.TestCase):
         self.assertIsNone(data["error"])
 
 
+class RedirectTests(unittest.TestCase):
+    def setUp(self):
+        self.client = web.app.test_client()
+
+    def get(self, path, host, public):
+        with mock.patch.dict(os.environ, {"PUBLIC_URL": public}):
+            return self.client.get(path, headers={"Host": host})
+
+    def test_old_tailscale_links_go_to_the_domain_with_path_and_query(self):
+        r = self.get("/unsubscribe?token=abc", "better-termin.tail015e29.ts.net", "https://bettertermin.com")
+        self.assertEqual(r.status_code, 301)
+        self.assertEqual(r.headers["Location"], "https://bettertermin.com/unsubscribe?token=abc")
+
+    def test_no_redirect_on_the_domain_itself_or_before_switching(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        with mock.patch.object(web, "DB_PATH", Path(tmp.name) / "t.db"):
+            web.init_db()
+            self.assertEqual(self.get("/privacy", "bettertermin.com", "https://bettertermin.com").status_code, 200)
+            self.assertEqual(self.get("/privacy", "x.tail015e29.ts.net", "https://x.tail015e29.ts.net").status_code, 200)
+
+    def test_form_posts_on_the_old_address_are_not_redirected(self):
+        with mock.patch.dict(os.environ, {"PUBLIC_URL": "https://bettertermin.com"}):
+            r = self.client.post("/unsubscribe", data={"token": "x"}, headers={"Host": "better-termin.tail015e29.ts.net"})
+        self.assertNotEqual(r.status_code, 301)
+
+
 class ParseTests(unittest.TestCase):
     PAGE = """<h1>Schritt 4</h1>
     <h3 title="Montag, 11.01.2027">Montag, 11.01.2027</h3>

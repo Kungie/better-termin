@@ -32,7 +32,7 @@ from email.utils import make_msgid
 from pathlib import Path
 
 import requests
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request
 
 import termin_bot as bot
 
@@ -81,6 +81,20 @@ def allowed_origins() -> set[str]:
     if os.environ.get("PUBLIC_URL"):
         origins.add(os.environ["PUBLIC_URL"].rstrip("/"))
     return origins
+
+
+@app.before_request
+def redirect_old_address():
+    """Send visitors of the old Tailscale address to the public domain.
+
+    Alert and confirmation e-mails sent before the domain existed link to the
+    *.ts.net address; they keep working and land on the same page there.
+    """
+    public = os.environ.get("PUBLIC_URL", "").rstrip("/")
+    if (request.method in ("GET", "HEAD") and request.host.endswith(".ts.net")
+            and public and not public.split("://")[-1].endswith(".ts.net")):
+        target = public + request.full_path.rstrip("?")
+        return redirect(target, 301)
 
 
 @app.before_request

@@ -1,4 +1,5 @@
-# Better Termin on a home server, published with Tailscale Funnel.
+# Better Termin on a home server, published at bettertermin.com through a
+# Cloudflare Tunnel; the old Tailscale Funnel address redirects there.
 #
 # The tailscale container joins the tailnet as its own device ("better-termin"),
 # so the site gets https://better-termin.<tailnet>.ts.net without touching the
@@ -36,6 +37,20 @@ services:
     mem_limit: 256m
     pids_limit: 100
     depends_on: [tailscale]
+    restart: unless-stopped
+
+  # Publishes the app at https://bettertermin.com through a Cloudflare Tunnel.
+  # Shares the same network namespace, so it reaches the app on localhost:8000;
+  # no port is opened on the host. The tunnel token lives in cloudflared.env.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    network_mode: service:tailscale
+    env_file: cloudflared.env
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [app]
     restart: unless-stopped
 
 volumes:

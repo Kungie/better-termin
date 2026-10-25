@@ -4,3 +4,4 @@ state.json
 .env
 .DS_Store
 data/
+cloudflared.env
