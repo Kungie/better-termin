@@ -4,8 +4,15 @@
     {
       "name": "termin-web",
       "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["web.py", "--port", "8000"],
-      "port": 8000
+      "runtimeArgs": [
+        "web.py",
+        "--port",
+        "8000"
+      ],
+      "port": 8000,
+      "env": {
+        "DEV_MAIL_LOG": "1"
+      }
     }
   ]
 }

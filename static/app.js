@@ -6,6 +6,8 @@ const ICONS = {
   bell: icon('<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
   check: icon('<path d="M20 6 9 17l-5-5"/>'),
   mail: icon('<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 7 9 6 9-6"/>'),
+  out: icon('<path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>'),
+  chevron: icon('<path d="m6 9 6 6 6-6"/>'),
 };
 let data = null, timer = null;
 // Alerts created in this browser: category id -> {token, status: "pending" | "active"}.
@@ -42,46 +44,39 @@ function daysUntil(dateIso) {
   return n <= 0 ? "today" : n === 1 ? "tomorrow" : `in ${n} days`;
 }
 
-function freqHtml(c) {
+function freqText(c) {
   const s = c.stats;
-  if (!s.openings) {
-    return `<div class="freq">No new slots have opened since tracking started (${fmtDay(data.tracking_since)}).</div>
-            <div class="sub">Opening frequency will appear here as data is collected.</div>`;
-  }
+  if (!s.openings) return `None opened since ${fmtDay(data.tracking_since)}`;
   const parts = [];
-  if (s.avg_interval_s) parts.push(`New slots open: <b>${every(s.avg_interval_s)}</b>`);
-  const sub = [`last opened ${ago(s.last_opened)} (${fmtDT(s.last_opened)})`];
-  if (s.typical_hour !== null) sub.push(`usually around ${pad(s.typical_hour)}:00`);
-  if (s.avg_open_s) sub.push(`stays open ~${dur(s.avg_open_s)}`);
-  sub.push(`${s.openings_30d}× in the last 30 days`);
-  return `<div class="freq">${parts.join("")}</div><div class="sub">${sub.join(" · ")}</div>`;
+  if (s.avg_interval_s) parts.push(`New slots ${every(s.avg_interval_s)}`);
+  parts.push(`last ${ago(s.last_opened)}`);
+  if (s.typical_hour !== null) parts.push(`usually around ${pad(s.typical_hour)}:00`);
+  if (s.avg_open_s) parts.push(`open for ~${dur(s.avg_open_s)}`);
+  return parts.join(" · ");
+}
+
+function slotHtml(c) {
+  if (c.error && !c.earliest) return `<p class="none">Couldn't check</p><p class="meta" title="${esc(c.error)}">The official site didn't answer</p>`;
+  if (!c.checked_at) return `<p class="none">Waiting for the first check</p>`;
+  if (!c.earliest) return `<p class="none">No free slots</p><p class="meta">${esc(freqText(c))}</p>`;
+  const d = new Date(c.earliest.date + "T00:00:00");
+  const meta = [daysUntil(c.earliest.date)];
+  if (c.available_since) meta.push(`opened ${ago(c.available_since)}`);
+  return `<p class="when"><span class="date">${fmtDate(c.earliest.date)}</span> <span class="day">${WD[d.getDay()]} ${esc(c.earliest.time)}</span></p>
+    <p class="meta"><span class="dot ok" aria-hidden="true"></span>${esc(meta.join(" · "))}</p>`;
 }
 
 function rowHtml(c) {
-  let status;
-  if (c.error && !c.earliest) {
-    status = `<span class="badge err">Check failed</span><div class="sub">${esc(c.error)}</div>`;
-  } else if (!c.checked_at) {
-    status = `<span class="badge none">Waiting for check…</span>`;
-  } else if (c.earliest) {
-    const d = new Date(c.earliest.date + "T00:00:00");
-    const extra = [];
-    if (c.available_since) extra.push(`opened ${ago(c.available_since)}`);
-    if (c.stats.earlier_30d) extra.push(`an earlier slot appeared ${c.stats.earlier_30d}× in the last 30 days`);
-    status = `<span class="badge ok">Available · ${daysUntil(c.earliest.date)}</span>
-      <div class="when">${fmtDate(c.earliest.date)} <span class="wd">${WD[d.getDay()]}</span> <span class="t">${esc(c.earliest.time)}</span></div>
-      ${extra.length ? `<div class="sub">${extra.join(" · ")}</div>` : ""}`;
-  } else {
-    status = `<span class="badge none">No free slots right now</span>${freqHtml(c)}`;
-  }
   const a = myAlerts.get(c.id);
-  const label = !a ? `${ICONS.bell}E-mail alert` : a.status === "active" ? `${ICONS.check}Alert set` : `${ICONS.mail}Confirm in inbox`;
-  return `<li class="row">
-    <div><div class="cat">${esc(c.name)}</div><div class="loc" title="${esc(c.location || "")}">${esc((c.location || "").split(",")[0].replace(/^(Ausländeramt Aachen|StädteRegion Aachen)(\s*-\s*|\s+)?/, ""))}</div></div>
-    <div>${status}</div>
-    <div class="alert">
-      <button class="btn small ${a ? (a.status === "active" ? "on" : "pending") : ""}" data-alert="${esc(c.id)}">${label}</button>
-      <a class="btn small outline" href="${esc(c.booking_url)}" target="_blank" rel="noopener" title="Opens the booking site; pick “${esc(c.name)}” there">Go to site ↗</a>
+  const [cls, label] = !a ? ["", `${ICONS.bell}E-mail alert`]
+    : a.status === "active" ? ["on", `${ICONS.check}Alert set`] : ["pending", `${ICONS.mail}Confirm in inbox`];
+  const loc = (c.location || "").split(",")[0].replace(/^(Ausländeramt Aachen|StädteRegion Aachen)(\s*-\s*|\s+)?/, "");
+  return `<li class="row${c.earliest ? " has-slot" : ""}">
+    <div class="cat"><p class="name">${esc(c.name)}</p>${loc ? `<p class="loc" title="${esc(c.location)}">${esc(loc)}</p>` : ""}</div>
+    <div class="slot">${slotHtml(c)}</div>
+    <div class="acts">
+      <button class="btn small ${cls}" data-alert="${esc(c.id)}">${label}</button>
+      <a class="btn small link" href="${esc(c.booking_url)}" target="_blank" rel="noopener" title="Opens the booking site; pick “${esc(c.name)}” there">Go to site${ICONS.out}</a>
     </div>
   </li>`;
 }
@@ -102,16 +97,17 @@ function showProblem(error, lastOk) {
 }
 
 function groupSummary(items) {
-  return `${items.filter(c => c.earliest).length}/${items.length} available`;
+  return `${items.filter(c => c.earliest).length} of ${items.length}`;
 }
 
 function render() {
   if (!data) return;
   const cats = data.categories;
   const avail = cats.filter(c => c.earliest).length;
-  $("#s-avail").textContent = cats.length ? `${avail} of ${cats.length} categories` : "–";
-  $("#s-last").textContent = data.last_check ? `${fmtTime(data.last_check)} (${ago(data.last_check)})` : "not yet";
-  $("#s-next").textContent = data.progress.running ? "checking now" : (data.next_check ? fmtTime(data.next_check) : "–");
+  $("#s-avail").textContent = cats.length ? `${avail} of ${cats.length} have free slots` : "–";
+  $("#s-last").textContent = data.last_check ? ago(data.last_check) : "not yet";
+  $("#s-last").title = data.last_check ? fmtDT(data.last_check) : "";
+  $("#s-next").textContent = data.progress.running ? "Checking now" : (data.next_check ? `Next ${fmtTime(data.next_check)}` : "");
   $("#s-since").textContent = fmtDay(data.tracking_since);
 
   const p = data.progress, bar = $("#progress");
@@ -121,7 +117,7 @@ function render() {
   showProblem(data.error, data.last_ok);
   $("#refresh").disabled = p.running;
 
-  if (!cats.length) { $("#list").innerHTML = `<div class="empty">Running the first check…</div>`; return; }
+  if (!cats.length) { $("#list").innerHTML = `<p class="empty">Running the first check…</p>`; return; }
 
   // office (Ausländeramt, Zulassungsstelle …) → group → categories, in server order
   const offices = [];
@@ -136,12 +132,15 @@ function render() {
   const isOpen = (o, g) => openGroups.has(g.key) || (o.name === "Ausländeramt" && openGroups.has(g.name));
   $("#list").innerHTML = offices.map(o => `
     <section class="office">
-      <h2 class="office-head"><span>${esc(o.name)}</span>
-        <span class="cnt">${groupSummary(o.groups.flatMap(g => g.items))}</span></h2>
-      ${o.groups.map(g => `
+      <div class="office-head"><h2>${esc(o.name)}</h2>
+        <span class="cnt">${groupSummary(o.groups.flatMap(g => g.items))} available</span></div>
+      ${o.groups.map(g => g.items.length === 1
+        // a group with a single category is just that category: show it directly
+        ? `<div class="group single"><ul class="rows">${rowHtml(g.items[0])}</ul></div>`
+        : `
       <details class="group" data-group="${esc(g.key)}" ${isOpen(o, g) ? "open" : ""}>
-        <summary class="group-head"><span class="gname">${esc(g.name === o.name ? "All services" : g.name)}</span>
-          <span class="cnt">${groupSummary(g.items)}</span></summary>
+        <summary><span class="gname">${esc(g.name === o.name ? "All services" : g.name)}</span>
+          <span class="cnt">${groupSummary(g.items)}</span>${ICONS.chevron}</summary>
         <ul class="rows">${g.items.map(rowHtml).join("")}</ul>
       </details>`).join("")}
     </section>`).join("");

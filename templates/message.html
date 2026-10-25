@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} · Better Termin{% endblock %}
 {% block content %}
-  <main class="content legal">
+  <main class="wrap page legal">
     <h1>{{ title }}</h1>
     <p>{{ text }}</p>
     {% if action %}
       {# A button instead of acting on GET, so mail scanners that open links don't confirm or remove alerts #}
       <form method="post" action="{{ action }}">
         <input type="hidden" name="token" value="{{ token }}">
-        <button class="btn" type="submit">{{ button }}</button>
+        <button class="btn primary" type="submit">{{ button }}</button>
       </form>
     {% endif %}
     <p><a href="/">Back to Better Termin</a></p>

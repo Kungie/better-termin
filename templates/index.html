@@ -1,30 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
-  <main class="content">
-    <h1>All appointment types — earliest available slot</h1>
+  <main class="wrap page">
+    <section class="intro">
+      <h1>Earliest free appointments</h1>
+      <p class="lead">Ausländeramt and Straßenverkehrsamt Aachen, checked every few minutes. Booking still happens on the official sites.</p>
 
-    <details class="infobox" open>
-      <summary>Overview</summary>
-      <div class="info-body">
-        <dl class="info-grid">
-          <dt>Available</dt><dd id="s-avail">–</dd>
-          <dt>Last check</dt><dd id="s-last">–</dd>
-          <dt>Next check</dt><dd id="s-next">–</dd>
-          <dt>Tracking since</dt><dd id="s-since">–</dd>
-        </dl>
-        <div class="actions">
-          <button class="btn" id="refresh">Check now</button>
-        </div>
+      <div class="status">
+        <p class="status-text">
+          <span class="dot ok" aria-hidden="true"></span><span id="s-avail">–</span>
+          <span class="sep" aria-hidden="true"></span>Checked <span id="s-last">–</span>
+          <span class="sep" aria-hidden="true"></span><span id="s-next">–</span>
+        </p>
+        <button class="btn ghost small" id="refresh">Check now</button>
       </div>
-    </details>
-    <div class="progress" id="progress" role="progressbar" aria-label="Check progress"><div></div></div>
+      <div class="progress" id="progress" role="progressbar" aria-label="Check progress"><div></div></div>
+      <p class="hint" id="hint"></p>
+      <div class="notice" id="banner" role="status" hidden></div>
+    </section>
 
-    <div class="toolbar">
-      <span class="hint" id="hint"></span>
-    </div>
-    <div class="note banner" id="banner" role="status" hidden></div>
-
-    <div id="list"><div class="empty">Loading…</div></div>
+    <div id="list"><p class="empty">Loading…</p></div>
+    <p class="since">Tracking since <span id="s-since">–</span>.</p>
   </main>
 
 
@@ -45,11 +40,11 @@
         <div class="m-err" id="dlg-err" role="alert"></div>
       </div>
       <div class="m-foot">
-        <button type="button" class="btn" id="dlg-cancel">Cancel</button>
-        <button type="submit" class="btn" id="dlg-ok">Set alert</button>
+        <button type="button" class="btn ghost" id="dlg-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="dlg-ok">Set alert</button>
       </div>
     </form>
   </dialog>
 
-<script src="/static/app.js" defer></script>
+<script src="/static/app.js?v=2" defer></script>
 {% endblock %}
