@@ -10,14 +10,14 @@
   --blue: #254c94;
   --blue-hover: #1c3d79;
   --lime: #b2c83a;
-  --ink: #1d2433;
-  --text: #3d4350;
-  --muted: #6b7280;
-  --line: #e4e7ec;
-  --line-strong: #d3d8e0;
-  --bg: #f6f7f9;
-  --card: #ffffff;
-  --tint: #f2f5fa;
+  --ink: #1b2232;
+  --text: #39404d;
+  --muted: #5f6878;
+  --line: #d9dfe8;
+  --line-strong: #c4ccd8;
+  --bg: #e6eaf1;      /* soft blue-grey from the navy, so the page isn't glaring white */
+  --card: #fafbfc;
+  --tint: #eef2f7;
   --amber: #b7791f;
   --amber-bg: #fdf6e7;
   --radius: 10px;
@@ -39,12 +39,13 @@ a:hover { color: var(--blue-hover); }
 .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px; }
 
 /* Top bar */
-.topbar { background: var(--card); border-bottom: 1px solid var(--line); }
+.topbar { background: var(--navy); }
 .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none;
-  color: var(--navy); font-weight: 600; font-size: 16px; letter-spacing: -.01em; }
+  color: #fff; font-weight: 600; font-size: 16px; letter-spacing: -.01em; }
+.brand:hover { color: #fff; }
 .brand img { display: block; border-radius: 7px; }
-.tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line-strong);
+.tag { font-size: 12px; color: rgba(255, 255, 255, .75); border: 1px solid rgba(255, 255, 255, .3);
   border-radius: 999px; padding: 2px 10px; }
 
 /* Intro and status */
@@ -167,7 +168,7 @@ dialog::backdrop { background: rgba(10, 37, 76, .35); }
 .legal .note { padding: 12px 14px; background: var(--amber-bg); border: 1px solid #f0dfb8; border-radius: var(--radius); font-size: 14px; }
 
 /* Footer */
-.site-footer { border-top: 1px solid var(--line); background: var(--card); }
+.site-footer { border-top: 1px solid var(--line); background: #dde2ea; }
 .site-footer .wrap { padding-top: 24px; padding-bottom: 32px; }
 .site-footer nav { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 10px; }
 .site-footer nav a { font-size: 14px; color: var(--text); text-decoration: none; }

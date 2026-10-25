@@ -134,10 +134,7 @@ function render() {
     <section class="office">
       <div class="office-head"><h2>${esc(o.name)}</h2>
         <span class="cnt">${groupSummary(o.groups.flatMap(g => g.items))} available</span></div>
-      ${o.groups.map(g => g.items.length === 1
-        // a group with a single category is just that category: show it directly
-        ? `<div class="group single"><ul class="rows">${rowHtml(g.items[0])}</ul></div>`
-        : `
+      ${o.groups.map(g => `
       <details class="group" data-group="${esc(g.key)}" ${isOpen(o, g) ? "open" : ""}>
         <summary><span class="gname">${esc(g.name === o.name ? "All services" : g.name)}</span>
           <span class="cnt">${groupSummary(g.items)}</span>${ICONS.chevron}</summary>
