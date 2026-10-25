@@ -59,7 +59,13 @@ h1 { margin: 0 0 8px; color: var(--ink); font-size: 30px; line-height: 1.2; font
   border-bottom: 1px solid var(--line); }
 .status-text { font-size: 14px; color: var(--muted); display: flex; align-items: center; flex-wrap: wrap; gap: 4px 0; }
 .status-text #s-avail { color: var(--ink); font-weight: 600; }
-.status-text .sep { width: 1px; height: 14px; background: var(--line-strong); margin: 0 14px; }
+/* Each item carries its separator on the left; the text is shifted left inside a
+   clipping box, so the separator of whichever item starts a line is hidden. */
+.status { overflow: hidden; }
+.status-text { margin-left: -12px; }
+.status-text .item { display: inline-flex; align-items: center; white-space: nowrap;
+  padding-left: 14px; margin-right: 14px; border-left: 1px solid var(--line-strong); line-height: 1.1; }
+.status-text .item:empty { display: none; }
 .status-text #s-last { margin-left: 4px; color: var(--text); }
 
 .progress { height: 2px; background: transparent; overflow: hidden; margin-top: -1px; visibility: hidden; }
@@ -180,7 +186,8 @@ dialog::backdrop { background: rgba(10, 37, 76, .35); }
   h1 { font-size: 25px; }
   .lead { font-size: 15px; }
   .status { align-items: flex-start; }
-  .status-text .sep { margin: 0 10px; }
+  .status-text { margin-left: -8px; }
+  .status-text .item { padding-left: 10px; margin-right: 10px; }
   .row { grid-template-columns: 1fr; gap: 10px; padding: 14px; }
   .acts { justify-self: stretch; }
   .acts .btn { flex: 1; }

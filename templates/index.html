@@ -7,9 +7,9 @@
 
       <div class="status">
         <p class="status-text">
-          <span class="dot ok" aria-hidden="true"></span><span id="s-avail">–</span>
-          <span class="sep" aria-hidden="true"></span>Checked <span id="s-last">–</span>
-          <span class="sep" aria-hidden="true"></span><span id="s-next">–</span>
+          <span class="item"><span class="dot ok" aria-hidden="true"></span><span id="s-avail">–</span></span>
+          <span class="item">Checked <span id="s-last">–</span></span>
+          <span class="item" id="s-next"></span>
         </p>
         <button class="btn ghost small" id="refresh">Check now</button>
       </div>
@@ -46,5 +46,5 @@
     </form>
   </dialog>
 
-<script src="/static/app.js?v=3" defer></script>
+<script src="/static/app.js?v=4" defer></script>
 {% endblock %}

@@ -113,7 +113,7 @@ function render() {
   const p = data.progress, bar = $("#progress");
   bar.classList.toggle("on", p.running);
   bar.firstElementChild.style.width = p.total ? `${(p.done / p.total) * 100}%` : "0";
-  $("#hint").textContent = p.running ? `Checking ${p.done}/${p.total}: ${p.current || ""}` : "";
+  $("#hint").textContent = p.running ? `Checking ${p.done}/${p.total}${p.current ? `: ${p.current}` : ""}` : "";
   showProblem(data.error, data.last_ok);
   $("#refresh").disabled = p.running;
 
