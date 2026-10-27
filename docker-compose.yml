@@ -10,6 +10,10 @@ services:
   tailscale:
     image: tailscale/tailscale:stable
     hostname: better-termin
+    # Fixed resolvers for the whole stack (app and cloudflared share this network
+    # namespace). The host's own DNS goes through Tailscale's MagicDNS, so when
+    # the host's Tailscale key expired the app couldn't resolve the booking site.
+    dns: [1.1.1.1, 9.9.9.9]
     environment:
       TS_STATE_DIR: /var/lib/tailscale
       TS_SERVE_CONFIG: /config/serve.json
