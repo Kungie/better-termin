@@ -481,17 +481,11 @@ class RedirectTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PUBLIC_URL": public}):
             return self.client.get(path, headers={"Host": host})
 
-    def test_old_tailscale_links_go_to_the_domain_with_path_and_query(self):
-        r = self.get("/unsubscribe?token=abc", "better-termin.tail015e29.ts.net", "https://bettertermin.com")
-        self.assertEqual(r.status_code, 301)
-        self.assertEqual(r.headers["Location"], "https://bettertermin.com/unsubscribe?token=abc")
-
-    def test_no_redirect_on_the_domain_itself_or_before_switching(self):
+    def test_no_redirect_on_the_domain_itself(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         with mock.patch.object(web, "DB_PATH", Path(tmp.name) / "t.db"):
             web.init_db()
             self.assertEqual(self.get("/privacy", "bettertermin.com", "https://bettertermin.com").status_code, 200)
-            self.assertEqual(self.get("/privacy", "x.tail015e29.ts.net", "https://x.tail015e29.ts.net").status_code, 200)
 
     def test_www_goes_to_the_bare_domain(self):
         r = self.get("/privacy", "www.bettertermin.com", "https://bettertermin.com")
@@ -504,12 +498,6 @@ class RedirectTests(unittest.TestCase):
             with web.app.test_request_context("/", headers={"Host": "x.tail015e29.ts.net", "CF-Connecting-IP": "1.2.3.4"},
                                               environ_base={"REMOTE_ADDR": "5.6.7.8"}):
                 self.assertEqual(web.client_ip(), "5.6.7.8")
-
-    def test_form_posts_on_the_old_address_are_not_redirected(self):
-        with mock.patch.dict(os.environ, {"PUBLIC_URL": "https://bettertermin.com"}):
-            r = self.client.post("/unsubscribe", data={"token": "x"}, headers={"Host": "better-termin.tail015e29.ts.net"})
-        self.assertNotEqual(r.status_code, 301)
-
 
 class ParseTests(unittest.TestCase):
     PAGE = """<h1>Schritt 4</h1>

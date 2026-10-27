@@ -6,6 +6,5 @@ __pycache__
 *.pyc
 .env
 state.json
-tailscale
 test_web.py
 cloudflared.env

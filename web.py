@@ -84,17 +84,11 @@ def allowed_origins() -> set[str]:
 
 
 @app.before_request
-def redirect_old_address():
-    """Send visitors of the old Tailscale address to the public domain.
-
-    Alert and confirmation e-mails sent before the domain existed link to the
-    *.ts.net address; they keep working and land on the same page there.
-    """
+def redirect_www():
+    """www.<domain> → <domain>, so the site has one address."""
     public = os.environ.get("PUBLIC_URL", "").rstrip("/")
     public_host = public.split("://")[-1]
-    if not public or public_host.endswith(".ts.net") or request.method not in ("GET", "HEAD"):
-        return None
-    if request.host.endswith(".ts.net") or request.host == f"www.{public_host}":
+    if public and request.method in ("GET", "HEAD") and request.host == f"www.{public_host}":
         return redirect(public + request.full_path.rstrip("?"), 301)
     return None
 
