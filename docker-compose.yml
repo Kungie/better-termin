@@ -25,6 +25,9 @@ services:
     restart: unless-stopped
 
   # The tunnel token lives in cloudflared.env (not committed).
+  # It lives in the app's network namespace: whenever the app container is
+  # recreated, recreate this one too (docker compose up -d --force-recreate
+  # cloudflared), or the tunnel answers 502.
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run
