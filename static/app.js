@@ -252,7 +252,7 @@ $("#dlg-form").addEventListener("submit", async (e) => {
   store("alertEmail", email);
   if (res.token) {
     myAlerts.set(dlgCat.id, { token: res.token, status: "pending" }); saveTokens(); render();
-    showDialog("done", `Check your inbox: we sent a confirmation link to ${email}. The alert starts once you click it.`);
+    showDialog("done", `Check your inbox: we sent a confirmation link to ${email}. The alert starts once you click it. If you don't see it, look in your spam folder and mark it as "not spam" so the alerts arrive in your inbox.`);
   } else if (res.status === "active") {
     showDialog("done", "This address already has an active alert for this category. To remove it, use the link in any alert e-mail.");
   } else {

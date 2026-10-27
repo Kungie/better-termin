@@ -27,7 +27,7 @@ class EventTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         web.init_db()
         self.sent = []
-        p = mock.patch.object(web, "send_email", lambda to, subj, body, html=None: self.sent.append((to, subj)))
+        p = mock.patch.object(web, "send_email", lambda to, subj, body, html=None, headers=None: self.sent.append((to, subj)))
         p.start()
         self.addCleanup(p.stop)
 
@@ -95,7 +95,7 @@ class AlertApiTests(unittest.TestCase):
         with web.db() as c:
             c.execute("INSERT INTO categories (id, name, grp, position) VALUES ('344','RWTH Studenten','RWTH',0)")
         self.mails = []
-        p = mock.patch.object(web, "send_email", lambda to, subj, body, html=None: self.mails.append((to, subj, body)))
+        p = mock.patch.object(web, "send_email", lambda to, subj, body, html=None, headers=None: self.mails.append((to, subj, body)))
         p.start(); self.addCleanup(p.stop)
         web._signups.clear()
         p = mock.patch.dict(os.environ, {"DEV_MAIL_LOG": "1"})
@@ -144,6 +144,14 @@ class AlertApiTests(unittest.TestCase):
         token = self.signup().get_json()["token"]
         self.assertEqual(self.client.delete("/api/alerts", json={"token": "wrong"}).status_code, 404)
         self.assertEqual(self.client.delete("/api/alerts", json={"token": token}).status_code, 200)
+        self.assertEqual(self.status(token), [])
+
+    def test_one_click_unsubscribe_from_mail_client(self):
+        # what Gmail sends for List-Unsubscribe-Post: a POST with no Origin, token in the URL
+        token = self.signup().get_json()["token"]
+        r = self.client.post(f"/unsubscribe?token={token}", data="List-Unsubscribe=One-Click",
+                             content_type="application/x-www-form-urlencoded")
+        self.assertEqual(r.status_code, 200)
         self.assertEqual(self.status(token), [])
 
     def test_unsubscribe_needs_post(self):
@@ -215,7 +223,18 @@ class SmtpTests(unittest.TestCase):
         server.auth.assert_called_once_with("PLAIN", server.auth_plain)
         self.assertEqual((server.user, server.password), ("me@example", "pw"))
         msg = server.send_message.call_args[0][0]
-        self.assertEqual((msg["To"], msg["From"], msg["Subject"]), ("to@example", "me@example", "Subject"))
+        self.assertEqual((msg["To"], msg["From"], msg["Subject"]), ("to@example", "Better Termin <me@example>", "Subject"))
+        self.assertTrue(msg["Date"] and msg["Message-ID"])
+
+    def test_alert_mail_carries_one_click_unsubscribe(self):
+        env = {"SMTP_HOST": "smtp.example", "SMTP_USER": "u", "SMTP_PASSWORD": "pw",
+               "SMTP_FROM": "Better Termin <alerts@bettertermin.com>"}
+        with mock.patch.dict(os.environ, env), mock.patch.object(web.smtplib, "SMTP") as smtp:
+            web.send_email("to@example", "S", "B", headers=web.unsubscribe_headers("tok"))
+        msg = smtp.return_value.send_message.call_args[0][0]
+        self.assertIn("unsubscribe?token=tok", msg["List-Unsubscribe"])
+        self.assertEqual(msg["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click")
+        self.assertTrue(msg["Message-ID"].endswith("@bettertermin.com>"))
 
     def test_html_alert_with_embedded_logo(self):
         subject, text, html = web.alert_email("RWTH Studenten", "2026-12-02 10:00", "opened", "tok")

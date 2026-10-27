@@ -28,7 +28,7 @@ from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from email.message import EmailMessage
-from email.utils import make_msgid
+from email.utils import formataddr, formatdate, make_msgid, parseaddr
 from pathlib import Path
 
 import requests
@@ -424,20 +424,29 @@ def render_email(template: str, **ctx) -> tuple[str, str]:
     return html, cid
 
 
-def send_email(to: str, subject: str, body: str, html: tuple[str, str] | None = None) -> None:
-    """Send via SMTP (e.g. Gmail with an app password), configured in .env.
+def send_email(to: str, subject: str, body: str, html: tuple[str, str] | None = None,
+               headers: dict[str, str] | None = None) -> None:
+    """Send via SMTP, configured in .env.
 
     `body` is the plain-text version; `html` is (html, logo cid) from render_email.
-    The logo is embedded in the message, so no remote image is loaded.
+    The logo is embedded in the message, so no remote image is loaded. `headers`
+    adds extra headers such as List-Unsubscribe.
     """
     if not smtp_configured():
         if os.environ.get("DEV_MAIL_LOG") == "1":  # local testing only: print the mail
             print(f"[dev mail] to {to}: {subject}\n{body}", file=sys.stderr, flush=True)
         return
     msg = EmailMessage()
-    msg["From"] = os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]
+    sender = os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]
+    name, addr = parseaddr(sender)
+    msg["From"] = formataddr((name or "Better Termin", addr))
     msg["To"] = to
     msg["Subject"] = subject
+    # Spam filters expect these; some relays don't add them.
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=addr.rsplit("@", 1)[-1] or None)
+    for key, value in (headers or {}).items():
+        msg[key] = value
     msg.set_content(body)
     if html:
         markup, cid = html
@@ -527,8 +536,18 @@ def notify_subscribers(cat: bot.Category, earliest: str, kind: str) -> None:
     with db() as c:
         subs = c.execute("SELECT * FROM alerts WHERE cat_id=? AND confirmed_at IS NOT NULL", (cat.id,)).fetchall()
         for sub in subs:
-            send_email(sub["email"], *alert_email(cat.name, earliest, kind, sub["token"], cat.site.booking_url))
+            send_email(sub["email"], *alert_email(cat.name, earliest, kind, sub["token"], cat.site.booking_url),
+                       headers=unsubscribe_headers(sub["token"]))
             c.execute("UPDATE alerts SET last_notified_at=? WHERE id=?", (now_iso(), sub["id"]))
+
+
+def unsubscribe_headers(token: str) -> dict[str, str]:
+    """One-click unsubscribe (RFC 8058), which Gmail and Yahoo expect from senders:
+    mail clients show an "Unsubscribe" button that POSTs to this URL."""
+    return {
+        "List-Unsubscribe": f"<{request_base()}unsubscribe?token={token}>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    }
 
 
 def request_base() -> str:
