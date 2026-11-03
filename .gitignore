@@ -5,3 +5,9 @@ state.json
 .DS_Store
 data/
 cloudflared.env
+
+# Secret copies and database backups
+.env.*
+!.env.example
+*.db
+*.bak

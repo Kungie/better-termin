@@ -8,3 +8,6 @@ __pycache__
 state.json
 test_web.py
 cloudflared.env
+.env.*
+*.db
+*.bak

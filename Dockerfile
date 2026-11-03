@@ -16,5 +16,5 @@ COPY templates ./templates
 RUN mkdir data && chown app:app data
 
 USER app
-# Only reachable through the Tailscale container (shared network namespace).
+# Only reachable through the cloudflared container (shared network namespace).
 CMD ["python", "web.py", "--host", "127.0.0.1", "--port", "8000"]
