@@ -409,8 +409,28 @@ def record(cat: bot.Category, results: list[bot.Result]) -> None:
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+def smtp_accounts() -> list[dict]:
+    """Configured SMTP accounts in the order they're tried: SMTP_* first, then
+    SMTP_FALLBACK_* (used e.g. when the main provider's daily quota is used up)."""
+    accounts = []
+    for prefix in ("SMTP_", "SMTP_FALLBACK_"):
+        cfg = {k: os.environ.get(prefix + k.upper(), "") for k in ("host", "port", "user", "password", "from")}
+        if cfg["host"] and cfg["user"] and cfg["password"]:
+            cfg["port"] = int(cfg["port"] or 587)
+            cfg["from"] = cfg["from"] or cfg["user"]
+            cfg["name"] = prefix.rstrip("_")
+            accounts.append(cfg)
+    return accounts
+
+
 def smtp_configured() -> bool:
-    return all(os.environ.get(k) for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"))
+    return bool(smtp_accounts())
+
+
+# After an account fails (quota, outage), skip it for a while instead of failing
+# again on every mail; the next account takes over meanwhile.
+SMTP_COOLDOWN = 3600
+smtp_failed_at: dict[str, float] = {}
 
 
 EMAIL_LOGO = ROOT / "static" / "icons" / "icon-192.png"
@@ -426,18 +446,37 @@ def render_email(template: str, **ctx) -> tuple[str, str]:
 
 def send_email(to: str, subject: str, body: str, html: tuple[str, str] | None = None,
                headers: dict[str, str] | None = None) -> None:
-    """Send via SMTP, configured in .env.
+    """Send via SMTP, configured in .env, falling back to the next account on failure.
 
     `body` is the plain-text version; `html` is (html, logo cid) from render_email.
     The logo is embedded in the message, so no remote image is loaded. `headers`
     adds extra headers such as List-Unsubscribe.
     """
-    if not smtp_configured():
+    accounts = smtp_accounts()
+    if not accounts:
         if os.environ.get("DEV_MAIL_LOG") == "1":  # local testing only: print the mail
             print(f"[dev mail] to {to}: {subject}\n{body}", file=sys.stderr, flush=True)
         return
+    now = time.time()
+    ready = [a for a in accounts if now - smtp_failed_at.get(a["name"], 0) >= SMTP_COOLDOWN]
+    # If every account is cooling down, try them all anyway rather than drop the mail.
+    for account in ready or accounts:
+        msg = build_message(account["from"], to, subject, body, html, headers)
+        try:
+            deliver(account, msg)
+        except (smtplib.SMTPException, OSError) as e:
+            smtp_failed_at[account["name"]] = now
+            code = getattr(e, "smtp_code", "")
+            print(f"Sending e-mail via {account['name']} failed: {type(e).__name__} {code}".rstrip(),
+                  file=sys.stderr)  # no address in logs
+            continue
+        smtp_failed_at.pop(account["name"], None)
+        return
+
+
+def build_message(sender: str, to: str, subject: str, body: str,
+                  html: tuple[str, str] | None, headers: dict[str, str] | None) -> EmailMessage:
     msg = EmailMessage()
-    sender = os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]
     name, addr = parseaddr(sender)
     msg["From"] = formataddr((name or "Better Termin", addr))
     msg["To"] = to
@@ -452,23 +491,23 @@ def send_email(to: str, subject: str, body: str, html: tuple[str, str] | None = 
         markup, cid = html
         msg.add_alternative(markup, subtype="html")
         msg.get_payload()[1].add_related(EMAIL_LOGO.read_bytes(), "image", "png", cid=cid)
-    host, port = os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT", "587"))
-    try:
-        if port == 465:
-            server = smtplib.SMTP_SSL(host, port, timeout=30)
-        else:
-            server = smtplib.SMTP(host, port, timeout=30)
-            server.starttls()
-        with server:
-            # AUTH PLAIN only: when it fails, smtplib's fallback to LOGIN makes Gmail
-            # drop the connection, which hides the real error (e.g. 535 bad credentials).
-            server.ehlo()
-            server.user, server.password = os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"]
-            server.auth("PLAIN", server.auth_plain)
-            server.send_message(msg)
-    except (smtplib.SMTPException, OSError) as e:
-        code = getattr(e, "smtp_code", "")
-        print(f"Sending e-mail failed: {type(e).__name__} {code}".rstrip(), file=sys.stderr)  # no address in logs
+    return msg
+
+
+def deliver(account: dict, msg: EmailMessage) -> None:
+    host, port = account["host"], account["port"]
+    if port == 465:
+        server = smtplib.SMTP_SSL(host, port, timeout=30)
+    else:
+        server = smtplib.SMTP(host, port, timeout=30)
+        server.starttls()
+    with server:
+        # AUTH PLAIN only: when it fails, smtplib's fallback to LOGIN makes Gmail
+        # drop the connection, which hides the real error (e.g. 535 bad credentials).
+        server.ehlo()
+        server.user, server.password = account["user"], account["password"]
+        server.auth("PLAIN", server.auth_plain)
+        server.send_message(msg)
 
 
 def send_confirmation(email: str, cat_name: str, confirm_token: str) -> None:

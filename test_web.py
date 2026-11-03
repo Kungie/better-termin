@@ -214,6 +214,9 @@ class AlertApiTests(unittest.TestCase):
 
 
 class SmtpTests(unittest.TestCase):
+    def setUp(self):
+        web.smtp_failed_at.clear()
+
     def test_sends_via_starttls(self):
         env = {"SMTP_HOST": "smtp.example", "SMTP_PORT": "587", "SMTP_USER": "me@example", "SMTP_PASSWORD": "pw"}
         with mock.patch.dict(os.environ, env), mock.patch.object(web.smtplib, "SMTP") as smtp:
@@ -256,6 +259,58 @@ class SmtpTests(unittest.TestCase):
     def test_html_escapes_category_names(self):
         _, _, html = web.alert_email("<script>x</script>", "2026-12-02 10:00", "opened", "tok")
         self.assertNotIn("<script>x", html[0])
+
+    FALLBACK = {"SMTP_HOST": "smtp.resend.com", "SMTP_USER": "resend", "SMTP_PASSWORD": "key",
+                "SMTP_FROM": "Better Termin <alerts@bettertermin.com>",
+                "SMTP_FALLBACK_HOST": "smtp.gmail.com", "SMTP_FALLBACK_USER": "me@gmail.com",
+                "SMTP_FALLBACK_PASSWORD": "app"}
+
+    def fake_smtp(self, failing_host):
+        sent = []
+
+        def factory(host, port, timeout):
+            server = mock.MagicMock()
+            server.__enter__.return_value = server
+            if host == failing_host:
+                server.send_message.side_effect = web.smtplib.SMTPDataError(450, b"daily quota exceeded")
+            else:
+                server.send_message.side_effect = lambda msg: sent.append((host, msg))
+            return server
+        return factory, sent
+
+    def test_falls_back_when_main_account_fails(self):
+        factory, sent = self.fake_smtp("smtp.resend.com")
+        with mock.patch.dict(os.environ, self.FALLBACK), mock.patch.object(web.smtplib, "SMTP", factory):
+            web.send_email("to@example", "S", "B", headers=web.unsubscribe_headers("tok"))
+        self.assertEqual(len(sent), 1)
+        host, msg = sent[0]
+        self.assertEqual(host, "smtp.gmail.com")
+        self.assertEqual(msg["From"], "Better Termin <me@gmail.com>")
+        self.assertTrue(msg["Message-ID"].endswith("@gmail.com>"))
+        self.assertIn("unsubscribe?token=tok", msg["List-Unsubscribe"])
+
+    def test_failed_account_is_skipped_for_a_while(self):
+        factory, sent = self.fake_smtp("smtp.resend.com")
+        hosts = []
+        def tracking(host, port, timeout):
+            hosts.append(host)
+            return factory(host, port, timeout)
+        with mock.patch.dict(os.environ, self.FALLBACK), mock.patch.object(web.smtplib, "SMTP", tracking):
+            web.send_email("a@example", "S", "B")
+            web.send_email("b@example", "S", "B")
+            self.assertEqual(hosts, ["smtp.resend.com", "smtp.gmail.com", "smtp.gmail.com"])
+            web.smtp_failed_at["SMTP"] -= web.SMTP_COOLDOWN  # an hour later, the main account is tried again
+            web.send_email("c@example", "S", "B")
+        self.assertEqual(hosts[-2:], ["smtp.resend.com", "smtp.gmail.com"])
+        self.assertEqual(len(sent), 3)
+
+    def test_without_fallback_failure_is_only_logged(self):
+        env = {k: v for k, v in self.FALLBACK.items() if not k.startswith("SMTP_FALLBACK_")}
+        env["SMTP_FALLBACK_HOST"] = ""
+        factory, sent = self.fake_smtp("smtp.resend.com")
+        with mock.patch.dict(os.environ, env), mock.patch.object(web.smtplib, "SMTP", factory):
+            web.send_email("to@example", "S", "B")
+        self.assertEqual(sent, [])
 
     def test_not_configured_sends_nothing(self):
         with mock.patch.dict(os.environ, {"SMTP_HOST": "", "DEV_MAIL_LOG": ""}), \
